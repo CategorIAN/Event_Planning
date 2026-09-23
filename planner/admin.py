@@ -4,9 +4,17 @@ from .models import (
     Form,
     FormQuestion,
     FormQuestionChoice,
+    FormQuestionGroup,
     FormRequest,
     FormSubmission,
+    Hour,
     Person,
+    Game,
+    GameType,
+    Platform,
+    Day,
+    FormQuestionGroupChoice,
+    Duration
 )
 
 
@@ -34,12 +42,26 @@ class FormAdmin(admin.ModelAdmin):
     ordering = ("name",)
 
 
+@admin.register(Hour)
+class HourAdmin(admin.ModelAdmin):
+    list_display = ("id", "time")
+    ordering = ("time",)
+
+
+@admin.register(FormQuestionGroup)
+class FormQuestionGroupAdmin(admin.ModelAdmin):
+    list_display = ("id", "form", "name", "google_item_id")
+    list_filter = ("form",)
+    search_fields = ("name", "google_item_id", "form__name")
+    ordering = ("form__name", "name")
+
+
 @admin.register(FormQuestion)
 class FormQuestionAdmin(admin.ModelAdmin):
-    list_display = ("id", "form", "name", "google_question_id")
-    list_filter = ("form",)
-    search_fields = ("name", "google_question_id", "form__name")
-    ordering = ("form__name", "name")
+    list_display = ("id", "form", "group", "name", "google_question_id", "hour")
+    list_filter = ("form", "group", "hour")
+    search_fields = ("name", "google_question_id", "form__name", "group__name")
+    ordering = ("form__name", "group__name", "name")
 
 
 @admin.register(FormQuestionChoice)
@@ -83,3 +105,106 @@ class FormSubmissionAdmin(admin.ModelAdmin):
         if obj:
             return ("google_response_id",)
         return ()
+
+
+@admin.register(GameType)
+class GameTypeAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "url",
+    )
+
+    search_fields = (
+        "name",
+    )
+
+    ordering = (
+        "name",
+    )
+
+
+@admin.register(Game)
+class GameAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "game_type", "url")
+    list_filter = ("game_type",)
+    search_fields = ("name", "game_type__name")
+    ordering = ("name",)
+
+
+@admin.register(Platform)
+class PlatformAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "url",
+    )
+
+    search_fields = (
+        "name",
+    )
+
+    ordering = (
+        "name",
+    )
+
+
+@admin.register(Day)
+class DayAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "order",
+    )
+
+    search_fields = (
+        "name",
+    )
+
+    ordering = (
+        "order",
+    )
+
+
+@admin.register(FormQuestionGroupChoice)
+class FormQuestionGroupChoiceAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "group",
+        "google_value",
+        "day",
+    )
+
+    list_filter = (
+        "group",
+        "day",
+    )
+
+    search_fields = (
+        "google_value",
+        "group__name",
+        "day__name",
+    )
+
+    ordering = (
+        "group__name",
+        "google_value",
+    )
+
+
+@admin.register(Duration)
+class DurationAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "days",
+    )
+
+    search_fields = (
+        "name",
+    )
+
+    ordering = (
+        "days",
+    )
+

@@ -1,4 +1,5 @@
 from django.db import models
+from datetime import timedelta
 
 
 class Person(models.Model):
@@ -31,10 +32,44 @@ class Person(models.Model):
         null=True,
     )
 
+    guest_games = models.TextField(
+        blank=True,
+    )
+
     event_cooldown = models.DurationField(
+        default=timedelta(weeks=1),
         blank=True,
         null=True,
     )
+
+    def __str__(self):
+        return self.name
+
+
+class Hour(models.Model):
+    time = models.TimeField(unique=True)
+
+    class Meta:
+        ordering = ["time"]
+
+    def __str__(self):
+        return self.time.strftime("%I:%M %p").lstrip("0")
+
+
+class Day(models.Model):
+    name = models.CharField(max_length=20, unique=True)
+    order = models.PositiveSmallIntegerField(unique=True)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return self.name
+
+
+class Duration(models.Model):
+    name = models.CharField(max_length=160)
+    days = models.PositiveIntegerField()
 
     def __str__(self):
         return self.name
@@ -57,17 +92,65 @@ class Form(models.Model):
         return self.name
 
 
+class FormQuestionGroup(models.Model):
+    form = models.ForeignKey(
+        Form,
+        on_delete=models.CASCADE,
+        related_name="question_groups",
+    )
+    google_item_id = models.CharField(max_length=255)
+    name = models.CharField(max_length=160)
+
+    def __str__(self):
+        return f"{self.form}: {self.name}"
+
+
+class GameType(models.Model):
+    name = models.CharField(max_length=160, unique=True)
+    url = models.URLField(blank=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Game(models.Model):
+    name = models.CharField(max_length=160, unique=True)
+    url = models.URLField(blank=True)
+
+    game_type = models.ForeignKey(
+        GameType,
+        on_delete=models.PROTECT,
+        related_name="games",
+    )
+
+    def __str__(self):
+        return self.name
+
+
+class Platform(models.Model):
+    name = models.CharField(max_length=160, unique=True)
+    url = models.URLField(blank=True)
+
+    def __str__(self):
+        return self.name
+
+
 class FormQuestion(models.Model):
     form = models.ForeignKey(
         Form,
         on_delete=models.CASCADE,
         related_name="questions",
     )
-
+    group = models.ForeignKey(
+        FormQuestionGroup,
+        on_delete=models.CASCADE,
+        related_name="questions",
+        blank=True,
+        null=True,
+    )
     google_question_id = models.CharField(
         max_length=255,
     )
-
     # Internal name used by the application, such as:
     # status, max_game_hours, event_cooldown
     name = models.CharField(
@@ -85,6 +168,14 @@ class FormQuestion(models.Model):
     def __str__(self):
         return f"{self.form}: {self.name}"
 
+    hour = models.ForeignKey(
+        "Hour",
+        on_delete=models.SET_NULL,
+        related_name="form_questions",
+        blank=True,
+        null=True,
+    )
+
 
 class FormQuestionChoice(models.Model):
     question = models.ForeignKey(
@@ -101,6 +192,38 @@ class FormQuestionChoice(models.Model):
     # Internal application-friendly value
     value = models.CharField(
         max_length=160,
+    )
+
+    game = models.ForeignKey(
+        Game,
+        on_delete=models.SET_NULL,
+        related_name="form_question_choices",
+        blank=True,
+        null=True,
+    )
+
+    platform = models.ForeignKey(
+        Platform,
+        on_delete=models.SET_NULL,
+        related_name="form_question_choices",
+        blank=True,
+        null=True,
+    )
+
+    game_type = models.ForeignKey(
+        GameType,
+        on_delete=models.SET_NULL,
+        related_name="form_question_choices",
+        blank=True,
+        null=True,
+    )
+
+    duration = models.ForeignKey(
+        Duration,
+        on_delete=models.SET_NULL,
+        related_name="form_question_choices",
+        blank=True,
+        null=True,
     )
 
     class Meta:
@@ -171,3 +294,38 @@ class FormSubmission(models.Model):
 
     def __str__(self):
         return f"{self.form}: {self.submitted_name} ({self.submitted_at})"
+
+
+class FormQuestionGroupChoice(models.Model):
+    group = models.ForeignKey(
+        FormQuestionGroup,
+        on_delete=models.CASCADE,
+        related_name="choices",
+    )
+
+    google_value = models.CharField(max_length=500)
+
+    day = models.ForeignKey(
+        Day,
+        on_delete=models.SET_NULL,
+        related_name="form_question_group_choices",
+        blank=True,
+        null=True,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "google_value"],
+                name="unique_google_value_per_question_group",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.google_value} → {self.day or '(unmapped)'}"
+
+
+
+
+
+
