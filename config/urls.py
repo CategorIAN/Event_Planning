@@ -17,6 +17,25 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
+from planner import views
+
 urlpatterns = [
+    path('', views.home, name='home'),
+    path('form-submissions/', views.form_submissions, name='form_submissions'),
+    path(
+        'form-submissions/sync/',
+        views.sync_google_form_responses,
+        name='sync_google_form_responses',
+    ),
+    path(
+        'form-submissions/<int:submission_id>/create/',
+        views.create_person_from_submission,
+        name='create_person_from_submission',
+    ),
+    path(
+        'form-submissions/<int:submission_id>/update/<int:person_id>/',
+        views.update_person_from_submission,
+        name='update_person_from_submission',
+    ),
     path('admin/', admin.site.urls),
 ]

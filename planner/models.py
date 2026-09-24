@@ -2,6 +2,90 @@ from django.db import models
 from datetime import timedelta
 
 
+class Day(models.Model):
+    name = models.CharField(max_length=20, unique=True)
+    order = models.PositiveSmallIntegerField(unique=True)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return self.name
+
+
+class Hour(models.Model):
+    time = models.TimeField(unique=True)
+
+    class Meta:
+        ordering = ["time"]
+
+    def __str__(self):
+        return self.time.strftime("%I:%M %p").lstrip("0")
+
+
+class DayHour(models.Model):
+    day = models.ForeignKey(
+        Day,
+        on_delete=models.CASCADE,
+        related_name="day_hours",
+    )
+    hour = models.ForeignKey(
+        Hour,
+        on_delete=models.CASCADE,
+        related_name="day_hours",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["day", "hour"],
+                name="unique_day_hour",
+            )
+        ]
+        ordering = ["day__order", "hour__time"]
+
+    def __str__(self):
+        return f"{self.day} at {self.hour}"
+
+
+class Duration(models.Model):
+    name = models.CharField(max_length=160)
+    days = models.PositiveIntegerField()
+
+    def __str__(self):
+        return self.name
+
+
+class GameType(models.Model):
+    name = models.CharField(max_length=160, unique=True)
+    url = models.URLField(blank=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Game(models.Model):
+    name = models.CharField(max_length=160, unique=True)
+    url = models.URLField(blank=True)
+
+    game_type = models.ForeignKey(
+        GameType,
+        on_delete=models.PROTECT,
+        related_name="games",
+    )
+
+    def __str__(self):
+        return self.name
+
+
+class Platform(models.Model):
+    name = models.CharField(max_length=160, unique=True)
+    url = models.URLField(blank=True)
+
+    def __str__(self):
+        return self.name
+
+
 class Person(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -42,34 +126,29 @@ class Person(models.Model):
         null=True,
     )
 
-    def __str__(self):
-        return self.name
+    availability = models.ManyToManyField(
+        DayHour,
+        related_name="available_people",
+        blank=True,
+    )
 
+    games = models.ManyToManyField(
+        Game,
+        related_name="interested_people",
+        blank=True,
+    )
 
-class Hour(models.Model):
-    time = models.TimeField(unique=True)
+    game_types = models.ManyToManyField(
+        GameType,
+        related_name="interested_people",
+        blank=True,
+    )
 
-    class Meta:
-        ordering = ["time"]
-
-    def __str__(self):
-        return self.time.strftime("%I:%M %p").lstrip("0")
-
-
-class Day(models.Model):
-    name = models.CharField(max_length=20, unique=True)
-    order = models.PositiveSmallIntegerField(unique=True)
-
-    class Meta:
-        ordering = ["order"]
-
-    def __str__(self):
-        return self.name
-
-
-class Duration(models.Model):
-    name = models.CharField(max_length=160)
-    days = models.PositiveIntegerField()
+    platforms = models.ManyToManyField(
+        Platform,
+        related_name="people",
+        blank=True,
+    )
 
     def __str__(self):
         return self.name
@@ -103,36 +182,6 @@ class FormQuestionGroup(models.Model):
 
     def __str__(self):
         return f"{self.form}: {self.name}"
-
-
-class GameType(models.Model):
-    name = models.CharField(max_length=160, unique=True)
-    url = models.URLField(blank=True)
-
-    def __str__(self):
-        return self.name
-
-
-class Game(models.Model):
-    name = models.CharField(max_length=160, unique=True)
-    url = models.URLField(blank=True)
-
-    game_type = models.ForeignKey(
-        GameType,
-        on_delete=models.PROTECT,
-        related_name="games",
-    )
-
-    def __str__(self):
-        return self.name
-
-
-class Platform(models.Model):
-    name = models.CharField(max_length=160, unique=True)
-    url = models.URLField(blank=True)
-
-    def __str__(self):
-        return self.name
 
 
 class FormQuestion(models.Model):
@@ -274,7 +323,6 @@ class FormSubmission(models.Model):
 
     google_response_id = models.CharField(
         max_length=255,
-        unique=True,
     )
 
     submitted_name = models.CharField(
@@ -294,6 +342,14 @@ class FormSubmission(models.Model):
 
     def __str__(self):
         return f"{self.form}: {self.submitted_name} ({self.submitted_at})"
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["form", "google_response_id", "submitted_at"],
+                name="unique_form_submission_revision",
+            )
+        ]
 
 
 class FormQuestionGroupChoice(models.Model):

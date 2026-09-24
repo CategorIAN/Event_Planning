@@ -1,5 +1,6 @@
 """Local-development access to Google Forms definitions."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,8 @@ from googleapiclient.errors import HttpError
 
 
 FORMS_READONLY_SCOPE = "https://www.googleapis.com/auth/forms.body.readonly"
-SCOPES = [FORMS_READONLY_SCOPE]
+FORMS_RESPONSES_READONLY_SCOPE = "https://www.googleapis.com/auth/forms.responses.readonly"
+SCOPES = [FORMS_READONLY_SCOPE, FORMS_RESPONSES_READONLY_SCOPE]
 
 
 class GoogleFormsError(Exception):
@@ -54,12 +56,15 @@ def get_forms_service():
     credentials = None
     if token_path.is_file():
         try:
-            credentials = Credentials.from_authorized_user_file(token_path, SCOPES)
+            credentials = Credentials.from_authorized_user_file(token_path)
         except (OSError, ValueError) as error:
             raise GoogleFormsAuthenticationError(
                 f"Could not read the saved OAuth token at {token_path}. "
                 "Delete it and authenticate again."
             ) from error
+
+        if not set(SCOPES).issubset(credentials.scopes or []):
+            credentials = None
 
     try:
         if credentials and credentials.expired and credentials.refresh_token:
@@ -101,6 +106,70 @@ def get_form(form_id: str) -> dict[str, Any]:
 def get_form_questions(form_id: str) -> list[dict[str, str | None]]:
     """Return the normal and grid-row questions in a Google Form."""
     return _extract_questions(get_form(form_id))
+
+
+def get_form_responses(
+    form_id: str, submitted_after: datetime | None = None
+) -> dict[str, list[dict[str, Any]]]:
+    """Retrieve every submitted response for a Google Form without altering answers."""
+    if not form_id:
+        raise GoogleFormsRetrievalError("A Google Form ID is required.")
+
+    response_filter = _response_filter(submitted_after) if submitted_after else None
+    service = get_forms_service()
+    responses: list[dict[str, Any]] = []
+    page_token = None
+
+    try:
+        while True:
+            request_arguments = {"formId": form_id}
+            if response_filter:
+                request_arguments["filter"] = response_filter
+            if page_token:
+                request_arguments["pageToken"] = page_token
+
+            page = service.forms().responses().list(**request_arguments).execute()
+            if not isinstance(page, dict):
+                raise GoogleFormsRetrievalError(
+                    "Google Forms API returned an unexpected responses response."
+                )
+
+            page_responses = page.get("responses", [])
+            if not isinstance(page_responses, list) or not all(
+                isinstance(response, dict) for response in page_responses
+            ):
+                raise GoogleFormsRetrievalError(
+                    "Google Forms API returned invalid form responses."
+                )
+            responses.extend(page_responses)
+
+            page_token = page.get("nextPageToken")
+            if page_token is None:
+                break
+            if not isinstance(page_token, str) or not page_token:
+                raise GoogleFormsRetrievalError(
+                    "Google Forms API returned an invalid next page token."
+                )
+    except HttpError as error:
+        if error.resp.status in {403, 404}:
+            raise GoogleFormsRetrievalError(
+                "The Google Form was not found or the authorized account cannot access its responses."
+            ) from error
+        raise GoogleFormsRetrievalError(
+            f"Google Forms API response request failed with status {error.resp.status}."
+        ) from error
+
+    return {"responses": responses}
+
+
+def _response_filter(submitted_after: datetime) -> str:
+    if submitted_after.tzinfo is None:
+        raise GoogleFormsRetrievalError(
+            "The submitted-after timestamp must include timezone information."
+        )
+
+    timestamp = submitted_after.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return f"timestamp > {timestamp}"
 
 
 def _extract_questions(form: dict[str, Any]) -> list[dict[str, str | None]]:

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Event Planner{% endblock %}</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        .app-layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 16px;
+            padding: 24px 16px;
+            box-sizing: border-box;
+            overflow: hidden;
+            transition: width 0.2s ease;
+            background: #000000;
+        }
+
+        .sidebar:hover {
+            width: 220px;
+        }
+
+        .nav-link {
+            display: block;
+            padding: 10px 12px;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.1s ease;
+            pointer-events: none;
+        }
+
+        .sidebar:hover .nav-link {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .nav-link:hover {
+            background: #374151;
+        }
+
+        .page-content {
+            flex: 1;
+            padding: 1rem;
+            min-width: 0;
+        }
+
+        {% block extra_head %}{% endblock %}
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <nav class="sidebar">
+            <a class="nav-link" href="#">People</a>
+            <a class="nav-link" href="#">Events</a>
+            <a class="nav-link" href="#">Games</a>
+            <a class="nav-link" href="#">Availability</a>
+            <a class="nav-link" href="#">Forms</a>
+            <a class="nav-link" href="{% url 'form_submissions' %}">Form Submissions</a>
+        </nav>
+
+        <main class="page-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>
