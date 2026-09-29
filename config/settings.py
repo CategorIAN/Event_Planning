@@ -122,6 +122,11 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+GENERAL_SURVEY_FORM_ID = os.environ.get(
+    "GENERAL_SURVEY_FORM_ID",
+    "1N6QRk-OwsVANBopI11X9NOQTPcTyGP6K8Ql-ocXbayI",
+)
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

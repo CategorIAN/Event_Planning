@@ -1,12 +1,19 @@
 from difflib import SequenceMatcher
+from urllib.parse import urlencode
+from uuid import uuid4
 
+from django.conf import settings
 from django.contrib import messages
 from django.db import transaction
+from django.db.models import Max, Prefetch, Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from planner.models import FormSubmission, Person
+from planner.forms import SendSurveyRequestForm
+from planner.models import Form, FormRequest, FormSubmission, Person
 from planner.services.form_response_sync import (
     FormResponseSynchronizationError,
     apply_form_submission_to_person,
@@ -14,6 +21,21 @@ from planner.services.form_response_sync import (
     synchronize_google_form_responses,
 )
 from planner.services.google_forms import GoogleFormsError
+from planner.services.survey_updates import (
+    DUE_STATUSES,
+    STATUS_ORDER,
+    calculate_survey_update_schedule,
+    default_request_type_for_status,
+)
+from planner.services.survey_request_emails import (
+    SurveyRequestEmailError,
+    SurveyRequestRecordingError,
+    request_survey_email,
+)
+
+
+SURVEY_REQUEST_ACTIONS_SESSION_KEY = "survey_request_actions"
+SURVEY_REQUEST_CONFIRMATION_SESSION_KEY = "survey_request_confirmation"
 
 
 def home(request: HttpRequest) -> HttpResponse:
@@ -110,3 +132,207 @@ def update_person_from_submission(
 
     messages.success(request, "Updated the selected Person from the Form Submission.")
     return redirect("form_submissions")
+
+
+def survey_updates(request: HttpRequest) -> HttpResponse:
+    selected_form, form_error = _select_survey_form()
+    due_only = request.GET.get("due_only") == "1"
+    context = _survey_update_context(request, selected_form, form_error, due_only)
+    context["email_confirmation"] = request.session.pop(
+        SURVEY_REQUEST_CONFIRMATION_SESSION_KEY, None
+    )
+    return render(request, "planner/survey_updates.html", context)
+
+
+@require_POST
+def mark_survey_requested(request: HttpRequest) -> HttpResponse:
+    request_form = SendSurveyRequestForm(request.POST)
+    due_only = request.POST.get("due_only") == "1"
+
+    if not request_form.is_valid():
+        return _render_survey_request_error(request, request_form, due_only)
+
+    person = request_form.cleaned_data["person"]
+    form = request_form.cleaned_data["form"]
+    action_token = request_form.cleaned_data["action_token"]
+    actions = request.session.get(SURVEY_REQUEST_ACTIONS_SESSION_KEY, {})
+    action = actions.pop(action_token, None)
+    request.session[SURVEY_REQUEST_ACTIONS_SESSION_KEY] = actions
+    request.session.modified = True
+    if action != {"person_id": person.pk, "form_id": form.pk}:
+        request_form.add_error(
+            None,
+            "This request action is no longer valid. Refresh the page and try again.",
+        )
+        return _render_survey_request_error(request, request_form, due_only)
+
+    try:
+        result = request_survey_email(
+            person,
+            form,
+            request_form.cleaned_data["request_type"],
+        )
+    except SurveyRequestRecordingError as error:
+        _store_email_confirmation(
+            request,
+            email=error.email,
+            message_id=error.message_id,
+            recorded=False,
+            error=str(error),
+        )
+        messages.error(request, str(error))
+    except SurveyRequestEmailError as error:
+        messages.error(request, f"The survey request could not be sent: {error}")
+    else:
+        _store_email_confirmation(
+            request,
+            email=result.email,
+            message_id=result.message_id,
+            recorded=True,
+        )
+        messages.success(request, f"Sent a survey request to {person.name}.")
+
+    return redirect(_survey_updates_url(due_only))
+
+
+def _select_survey_form() -> tuple[Form | None, str | None]:
+    if not settings.GENERAL_SURVEY_FORM_ID:
+        return None, "GENERAL_SURVEY_FORM_ID is not configured."
+    try:
+        return Form.objects.get(google_form_id=settings.GENERAL_SURVEY_FORM_ID), None
+    except Form.DoesNotExist:
+        return (
+            None,
+            "No Form exists with the configured GENERAL_SURVEY_FORM_ID.",
+        )
+
+
+def _survey_update_context(
+    request: HttpRequest,
+    selected_form: Form | None,
+    form_error: str | None,
+    due_only: bool,
+    *,
+    form_errors: dict[int, SendSurveyRequestForm] | None = None,
+) -> dict[str, object]:
+    rows = []
+    now = timezone.now()
+    if selected_form is not None:
+        people = Person.objects.filter(
+            status__in=[Person.Status.ACTIVE, Person.Status.NOT_NOW]
+        ).annotate(
+            last_requested_at=Max(
+                "form_requests__requested_at",
+                filter=Q(form_requests__form=selected_form),
+            ),
+            last_submitted_at=Max(
+                "form_submissions__submitted_at",
+                filter=Q(form_submissions__form=selected_form),
+            ),
+        ).prefetch_related(
+            Prefetch(
+                "form_requests",
+                queryset=FormRequest.objects.filter(form=selected_form).only(
+                    "person_id", "requested_at"
+                ),
+                to_attr="selected_form_requests",
+            )
+        )
+        for person in people:
+            schedule = calculate_survey_update_schedule(
+                person_status=person.status,
+                last_requested_at=person.last_requested_at,
+                last_submitted_at=person.last_submitted_at,
+                now=now,
+            )
+            if due_only and schedule.status not in DUE_STATUSES:
+                continue
+            person.schedule = schedule
+            person.request_count = sum(
+                person.last_submitted_at is None
+                or form_request.requested_at > person.last_submitted_at
+                for form_request in person.selected_form_requests
+            )
+            action_token = uuid4().hex
+            person.request_form = (form_errors or {}).get(
+                person.pk,
+                SendSurveyRequestForm(
+                    initial={
+                        "person": person.pk,
+                        "form": selected_form.pk,
+                        "action_token": action_token,
+                        "request_type": default_request_type_for_status(
+                            schedule.status
+                        ),
+                    }
+                ),
+            )
+            if person.pk not in (form_errors or {}):
+                actions = request.session.get(SURVEY_REQUEST_ACTIONS_SESSION_KEY, {})
+                actions[action_token] = {
+                    "person_id": person.pk,
+                    "form_id": selected_form.pk,
+                }
+                request.session[SURVEY_REQUEST_ACTIONS_SESSION_KEY] = actions
+            rows.append(person)
+        rows.sort(
+            key=lambda person: (
+                STATUS_ORDER[person.schedule.status],
+                person.schedule.next_contact_due,
+                person.name.casefold(),
+            )
+        )
+
+    return {
+        "selected_form": selected_form,
+        "form_error": form_error,
+        "due_only": due_only,
+        "rows": rows,
+    }
+
+
+def _render_survey_request_error(
+    request: HttpRequest,
+    request_form: SendSurveyRequestForm,
+    due_only: bool,
+) -> HttpResponse:
+    messages.error(request, "The survey request could not be sent.")
+    selected_form, form_error = _select_survey_form()
+    form_errors = {}
+    person_id = request.POST.get("person")
+    if person_id and person_id.isdigit():
+        form_errors[int(person_id)] = request_form
+    context = _survey_update_context(
+        request,
+        selected_form,
+        form_error,
+        due_only,
+        form_errors=form_errors,
+    )
+    return render(request, "planner/survey_updates.html", context, status=400)
+
+
+def _store_email_confirmation(
+    request: HttpRequest,
+    *,
+    email,
+    message_id: str | None,
+    recorded: bool,
+    error: str | None = None,
+) -> None:
+    """Save the actual sent message for one post-redirect-get confirmation modal."""
+    request.session[SURVEY_REQUEST_CONFIRMATION_SESSION_KEY] = {
+        "recipient": email.recipient,
+        "subject": email.subject,
+        "body": email.body,
+        "message_id": message_id,
+        "recorded": recorded,
+        "error": error,
+    }
+
+
+def _survey_updates_url(due_only: bool) -> str:
+    parameters = {}
+    if due_only:
+        parameters["due_only"] = "1"
+    return f"{reverse('survey_updates')}?{urlencode(parameters)}"

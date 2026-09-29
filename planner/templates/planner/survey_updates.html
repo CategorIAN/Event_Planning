@@ -1,0 +1,272 @@
+{% extends "planner/base.html" %}
+
+{% block title %}Survey Updates | Event Planner{% endblock %}
+
+{% block extra_head %}
+        .survey-header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: end;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .survey-controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: end;
+            gap: 0.75rem;
+        }
+
+        .survey-controls label,
+        .request-type-label {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+            font-weight: 600;
+        }
+
+        .action-button {
+            padding: 0.5rem 0.8rem;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #222;
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .action-button:hover {
+            background: #444;
+        }
+
+        .survey-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .survey-table th,
+        .survey-table td {
+            padding: 0.75rem;
+            border: 1px solid #b9b9b9;
+            vertical-align: top;
+            text-align: left;
+        }
+
+        .survey-table th {
+            background: #e3e3e3;
+        }
+
+        .survey-table tr.request-count-warning td {
+            background: #fff2cc;
+        }
+
+        .survey-table tr.request-count-danger td {
+            background: #f4cccc;
+        }
+
+        .status-label {
+            font-weight: 700;
+        }
+
+        .request-form {
+            display: grid;
+            gap: 0.5rem;
+            min-width: 190px;
+        }
+
+        .errorlist {
+            margin: 0;
+            padding-left: 1.2rem;
+            color: #9b1c1c;
+        }
+
+        .notice {
+            margin-bottom: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            background: #f4cccc;
+        }
+
+        .email-confirmation-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            background: rgba(0, 0, 0, 0.72);
+        }
+
+        .email-confirmation-content {
+            position: relative;
+            width: min(720px, 100%);
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 1.5rem;
+            border-radius: 12px;
+            background: #fff;
+            color: #111;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+        }
+
+        .email-confirmation-content h2 {
+            margin-top: 0;
+        }
+
+        .email-confirmation-close {
+            position: absolute;
+            top: 0.75rem;
+            right: 0.75rem;
+            border: none;
+            background: none;
+            font-size: 1.75rem;
+            line-height: 1;
+            cursor: pointer;
+        }
+
+        .email-body {
+            margin: 1rem 0 0;
+            padding: 1rem;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            font-family: inherit;
+            line-height: 1.5;
+            background: #f4f4f4;
+            border: 1px solid #d2d2d2;
+        }
+
+        @media (max-width: 900px) {
+            .survey-table {
+                display: block;
+                overflow-x: auto;
+            }
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="survey-header">
+        <div>
+            <h1>Survey Updates</h1>
+            <p>Track requests and survey update timing for the selected form.</p>
+        </div>
+        <form class="survey-controls" method="get">
+            <label>
+                <input type="checkbox" name="due_only" value="1" {% if due_only %}checked{% endif %} onchange="this.form.submit()">
+                Due only
+            </label>
+            <noscript><button class="action-button" type="submit">Apply</button></noscript>
+        </form>
+    </div>
+
+    {% if form_error %}
+        <div class="notice">{{ form_error }}</div>
+    {% endif %}
+
+    {% for message in messages %}
+        <div class="notice">{{ message }}</div>
+    {% endfor %}
+
+    {% if selected_form %}
+        <table class="survey-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Last Submission</th>
+                    <th>Last request</th>
+                    <th>Due</th>
+                    <th>Survey Status</th>
+                    <th>Request Count</th>
+                    <th>Request</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for person in rows %}
+                    <tr{% if person.request_count >= 3 %} class="request-count-danger"{% elif person.request_count == 2 %} class="request-count-warning"{% endif %}>
+                        <td>{{ person.name }}</td>
+                        <td>{{ person.email|default:"Never" }}</td>
+                        <td>{{ person.get_status_display }}</td>
+                        <td>{% if person.last_submitted_at %}{{ person.last_submitted_at|date:"M j, Y" }}{% else %}Never{% endif %}</td>
+                        <td>{% if person.last_requested_at %}{{ person.last_requested_at|date:"M j, Y" }}{% else %}Never{% endif %}</td>
+                        <td>{{ person.schedule.next_contact_due|date:"M j, Y" }}</td>
+                        <td><span class="status-label">{{ person.schedule.status }}</span></td>
+                        <td>{{ person.request_count }}</td>
+                        <td>
+                            <form class="request-form" method="post" action="{% url 'mark_survey_requested' %}">
+                                {% csrf_token %}
+                                {{ person.request_form.person }}
+                                {{ person.request_form.form }}
+                                {{ person.request_form.action_token }}
+                                {{ person.request_form.person.errors }}
+                                {{ person.request_form.form.errors }}
+                                {{ person.request_form.action_token.errors }}
+                                <input type="hidden" name="due_only" value="{% if due_only %}1{% endif %}">
+                                <label class="request-type-label">
+                                    Request Type
+                                    {{ person.request_form.request_type }}
+                                </label>
+                                {{ person.request_form.request_type.errors }}
+                                {{ person.request_form.non_field_errors }}
+                                <button class="action-button request-button" type="submit">Request</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="9">No people match this filter.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+
+    {% if email_confirmation %}
+        <div class="email-confirmation-modal" id="email-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="email-confirmation-title">
+            <section class="email-confirmation-content">
+                <button class="email-confirmation-close" type="button" aria-label="Close confirmation">&times;</button>
+                {% if email_confirmation.recorded %}
+                    <h2 id="email-confirmation-title">Survey request sent</h2>
+                    <p>The email was sent and the request was recorded.</p>
+                {% else %}
+                    <h2 id="email-confirmation-title">Email sent, but request was not recorded</h2>
+                    <p>{{ email_confirmation.error }}</p>
+                {% endif %}
+                <p><strong>Recipient:</strong> {{ email_confirmation.recipient }}</p>
+                <p><strong>Subject:</strong> {{ email_confirmation.subject }}</p>
+                <pre class="email-body">{{ email_confirmation.body }}</pre>
+            </section>
+        </div>
+    {% endif %}
+{% endblock %}
+
+{% block extra_script %}
+    <script>
+        document.querySelectorAll(".request-form").forEach(form => {
+            form.addEventListener("submit", () => {
+                const button = form.querySelector(".request-button");
+                if (button) {
+                    button.disabled = true;
+                    button.textContent = "Sending...";
+                }
+            });
+        });
+
+        const confirmationModal = document.getElementById("email-confirmation-modal");
+        if (confirmationModal) {
+            const closeConfirmation = () => confirmationModal.remove();
+            confirmationModal.querySelector(".email-confirmation-close").addEventListener("click", closeConfirmation);
+            confirmationModal.addEventListener("click", event => {
+                if (event.target === confirmationModal) {
+                    closeConfirmation();
+                }
+            });
+            document.addEventListener("keydown", event => {
+                if (event.key === "Escape") {
+                    closeConfirmation();
+                }
+            });
+        }
+    </script>
+{% endblock %}

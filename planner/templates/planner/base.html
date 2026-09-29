@@ -68,6 +68,7 @@
             <a class="nav-link" href="#">Availability</a>
             <a class="nav-link" href="#">Forms</a>
             <a class="nav-link" href="{% url 'form_submissions' %}">Form Submissions</a>
+            <a class="nav-link" href="{% url 'survey_updates' %}">Survey Updates</a>
         </nav>
 
         <main class="page-content">
@@ -75,4 +76,5 @@
         </main>
     </div>
 </body>
+{% block extra_script %}{% endblock %}
 </html>

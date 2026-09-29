@@ -1,5 +1,7 @@
-from django.db import models
 from datetime import timedelta
+
+from django.db import models
+from django.utils import timezone
 
 
 class Day(models.Model):
@@ -162,6 +164,8 @@ class Form(models.Model):
         unique=True,
     )
 
+    survey_url = models.URLField(blank=True)
+
     last_synced_at = models.DateTimeField(
         blank=True,
         null=True,
@@ -300,7 +304,7 @@ class FormRequest(models.Model):
         related_name="requests",
     )
 
-    requested_at = models.DateTimeField()
+    requested_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
         return f"{self.person} → {self.form}"

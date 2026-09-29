@@ -1,21 +1,18 @@
 """Local-development access to Google Forms definitions."""
 
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-from django.conf import settings
-from google.auth.exceptions import RefreshError
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-
-FORMS_READONLY_SCOPE = "https://www.googleapis.com/auth/forms.body.readonly"
-FORMS_RESPONSES_READONLY_SCOPE = "https://www.googleapis.com/auth/forms.responses.readonly"
-SCOPES = [FORMS_READONLY_SCOPE, FORMS_RESPONSES_READONLY_SCOPE]
+from planner.services.google_auth import (
+    FORMS_READONLY_SCOPE,
+    FORMS_RESPONSES_READONLY_SCOPE,
+    GoogleAuthorizationError,
+    SCOPES,
+    get_authorized_credentials,
+)
 
 
 class GoogleFormsError(Exception):
@@ -34,52 +31,15 @@ class GoogleFormsRetrievalError(GoogleFormsError):
     """Raised when a form cannot be retrieved or its response is invalid."""
 
 
-def _credentials_path() -> Path:
-    return Path(settings.BASE_DIR) / "credentials.json"
-
-
-def _token_path() -> Path:
-    return Path(settings.BASE_DIR) / "token.json"
-
-
 def get_forms_service():
     """Return an authenticated Google Forms API v1 service client."""
-    credentials_path = _credentials_path()
-    token_path = _token_path()
-
-    if not credentials_path.is_file():
-        raise GoogleFormsCredentialsError(
-            f"OAuth client credentials were not found at {credentials_path}. "
-            "Download a Desktop app OAuth client JSON file and save it there."
-        )
-
-    credentials = None
-    if token_path.is_file():
-        try:
-            credentials = Credentials.from_authorized_user_file(token_path)
-        except (OSError, ValueError) as error:
-            raise GoogleFormsAuthenticationError(
-                f"Could not read the saved OAuth token at {token_path}. "
-                "Delete it and authenticate again."
-            ) from error
-
-        if not set(SCOPES).issubset(credentials.scopes or []):
-            credentials = None
-
     try:
-        if credentials and credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-
-        if not credentials or not credentials.valid:
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
-            credentials = flow.run_local_server(port=0)
-            token_path.write_text(credentials.to_json(), encoding="utf-8")
-
-        return build("forms", "v1", credentials=credentials, cache_discovery=False)
-    except (OSError, ValueError, RefreshError) as error:
+        credentials = get_authorized_credentials()
+    except GoogleAuthorizationError as error:
         raise GoogleFormsAuthenticationError(
-            "Google OAuth authentication failed. Verify credentials.json, then try again."
+            str(error)
         ) from error
+    return build("forms", "v1", credentials=credentials, cache_discovery=False)
 
 
 def get_form(form_id: str) -> dict[str, Any]:

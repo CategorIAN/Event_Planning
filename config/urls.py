@@ -37,5 +37,11 @@ urlpatterns = [
         views.update_person_from_submission,
         name='update_person_from_submission',
     ),
+    path('survey-updates/', views.survey_updates, name='survey_updates'),
+    path(
+        'survey-updates/mark-requested/',
+        views.mark_survey_requested,
+        name='mark_survey_requested',
+    ),
     path('admin/', admin.site.urls),
 ]
