@@ -1,4 +1,5 @@
 from difflib import SequenceMatcher
+from datetime import time as datetime_time
 from urllib.parse import urlencode
 from uuid import uuid4
 
@@ -13,7 +14,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from planner.forms import SendSurveyRequestForm
-from planner.models import Form, FormRequest, FormSubmission, Person
+from planner.models import Day, Form, FormRequest, FormSubmission, Game, Hour, Person, TimeSpan
 from planner.services.form_response_sync import (
     FormResponseSynchronizationError,
     apply_form_submission_to_person,
@@ -40,6 +41,136 @@ SURVEY_REQUEST_CONFIRMATION_SESSION_KEY = "survey_request_confirmation"
 
 def home(request: HttpRequest) -> HttpResponse:
     return render(request, "planner/home.html")
+
+
+def availability(request: HttpRequest) -> HttpResponse:
+    """Show qualified interested-person counts for each game TimeSpan."""
+    days = list(Day.objects.exclude(name="Sunday").order_by("order"))
+    hours = list(Hour.objects.filter(time__gte=datetime_time(7)).order_by("time"))
+    games = list(
+        Game.objects.filter(expected_duration_hours__isnull=False)
+        .order_by("name")
+        .prefetch_related(
+            Prefetch(
+                "interested_people",
+                queryset=Person.objects.only("id", "name").prefetch_related("availability"),
+            )
+        )
+    )
+    time_spans = TimeSpan.objects.filter(end_hour__time__lte=datetime_time(18)).select_related(
+        "day", "start_hour", "end_hour"
+    ).prefetch_related("day_hours")
+    spans_by_key = {
+        (time_span.day_id, time_span.start_hour_id, time_span.duration_hours): time_span
+        for time_span in time_spans
+    }
+
+    game_grids = []
+    modal_cells = []
+    for game in games:
+        interested_people = [
+            {
+                "id": person.pk,
+                "name": person.name,
+                "availability": {day_hour.pk for day_hour in person.availability.all()},
+            }
+            for person in game.interested_people.all()
+        ]
+        grid_rows = []
+        for hour in hours:
+            cells = []
+            has_valid_span = False
+            for day in days:
+                time_span = spans_by_key.get(
+                    (day.pk, hour.pk, game.expected_duration_hours)
+                )
+                if time_span is None:
+                    cells.append(
+                        {
+                            "count": 0,
+                            "people": [],
+                            "day": day,
+                            "start_hour": hour,
+                            "end_hour": None,
+                        }
+                    )
+                    continue
+
+                has_valid_span = True
+                required_day_hours = {
+                    day_hour.pk for day_hour in time_span.day_hours.all()
+                }
+                qualifying_people = [
+                    person
+                    for person in interested_people
+                    if required_day_hours <= person["availability"]
+                ]
+                cells.append(
+                    {
+                        "count": len(qualifying_people),
+                        "people": qualifying_people,
+                        "day": day,
+                        "start_hour": time_span.start_hour,
+                        "end_hour": time_span.end_hour,
+                    }
+                )
+            if has_valid_span:
+                grid_rows.append({"hour": hour, "cells": cells})
+
+        maximum_count = max(
+            (cell["count"] for row in grid_rows for cell in row["cells"]),
+            default=0,
+        )
+        for row_index, row in enumerate(grid_rows):
+            for column_index, cell in enumerate(row["cells"]):
+                cell["css_class"] = _availability_cell_class(
+                    cell["count"],
+                    game.min_players,
+                    maximum_count,
+                )
+                cell_id = f"availability-{game.pk}-{row_index}-{column_index}"
+                cell["modal_id"] = cell_id
+                modal_cells.append(
+                    {
+                        "id": cell_id,
+                        "game_name": game.name,
+                        "day_name": cell["day"].name,
+                        "start_hour": str(cell["start_hour"]),
+                        "end_hour": (
+                            str(cell["end_hour"])
+                            if cell["end_hour"] is not None
+                            else None
+                        ),
+                        "count": cell["count"],
+                        "people": [person["name"] for person in cell["people"]],
+                    }
+                )
+        game_grids.append({"game": game, "rows": grid_rows})
+
+    return render(
+        request,
+        "planner/availability.html",
+        {
+            "days": days,
+            "game_grids": game_grids,
+            "modal_cells": modal_cells,
+        },
+    )
+
+
+def _availability_cell_class(
+    count: int,
+    min_players: int | None,
+    maximum_count: int,
+) -> str:
+    """Return a display class for a count within one game's grid."""
+    if min_players is None:
+        return ""
+    if count < min_players:
+        return "availability-low"
+    if count == maximum_count:
+        return "availability-best"
+    return "availability-valid"
 
 
 def form_submissions(request: HttpRequest) -> HttpResponse:

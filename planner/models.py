@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.db import models
 from django.utils import timezone
@@ -50,6 +50,53 @@ class DayHour(models.Model):
         return f"{self.day} at {self.hour}"
 
 
+class TimeSpan(models.Model):
+    """A half-open interval of availability slots on one day."""
+
+    day = models.ForeignKey(
+        Day,
+        on_delete=models.CASCADE,
+        related_name="time_spans",
+    )
+    start_hour = models.ForeignKey(
+        Hour,
+        on_delete=models.CASCADE,
+        related_name="starting_time_spans",
+    )
+    end_hour = models.ForeignKey(
+        Hour,
+        on_delete=models.CASCADE,
+        related_name="ending_time_spans",
+    )
+    day_hours = models.ManyToManyField(
+        DayHour,
+        related_name="time_spans",
+    )
+
+    @property
+    def duration_hours(self):
+        return self.end_hour.time.hour - self.start_hour.time.hour
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["day", "start_hour", "end_hour"],
+                name="unique_time_span",
+            )
+        ]
+        ordering = ["day__order", "start_hour__time", "end_hour__time"]
+
+    def __str__(self):
+        return f"{self.day} from {self.start_hour} to {self.end_hour}"
+
+    @property
+    def duration_hours(self) -> int:
+        """The clock duration between the interval's hour boundaries."""
+        start = datetime.combine(datetime.min.date(), self.start_hour.time)
+        end = datetime.combine(datetime.min.date(), self.end_hour.time)
+        return int((end - start).total_seconds() / 3600)
+
+
 class Duration(models.Model):
     name = models.CharField(max_length=160)
     days = models.PositiveIntegerField()
@@ -74,6 +121,20 @@ class Game(models.Model):
         GameType,
         on_delete=models.PROTECT,
         related_name="games",
+    )
+
+    expected_duration_hours = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    min_players = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+    )
+    max_players = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
     )
 
     def __str__(self):

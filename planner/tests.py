@@ -1,13 +1,25 @@
 import base64
-from datetime import datetime, timezone as datetime_timezone
+from datetime import datetime, time, timezone as datetime_timezone
 from email import message_from_bytes
 from unittest.mock import MagicMock, patch
 
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.db import DatabaseError
 
-from planner.models import Form, FormRequest, FormSubmission, Person
+from planner.models import (
+    Day,
+    DayHour,
+    Form,
+    FormRequest,
+    FormSubmission,
+    Game,
+    GameType,
+    Hour,
+    Person,
+    TimeSpan,
+)
 from planner.services.survey_updates import (
     AWAITING_RESPONSE,
     CURRENT,
@@ -409,3 +421,115 @@ class SurveyRequestEmailTests(TestCase):
         self.assertEqual(result.email.recipient, self.person.email)
         mocked_send_email.assert_not_called()
         self.assertFalse(FormRequest.objects.exists())
+
+
+class CreateTimeSpansCommandTests(TestCase):
+    def setUp(self):
+        self.day = Day.objects.create(name="Saturday", order=6)
+        self.hours = [
+            Hour.objects.create(time=time(hour, 0)) for hour in (16, 17, 18, 19)
+        ]
+        for hour_record in self.hours:
+            DayHour.objects.create(day=self.day, hour=hour_record)
+
+    def test_creates_half_open_spans_and_repairs_existing_relationships(self):
+        call_command("create_time_spans")
+
+        self.assertEqual(TimeSpan.objects.count(), 6)
+        span = TimeSpan.objects.get(
+            day=self.day,
+            start_hour=self.hours[0],
+            end_hour=self.hours[3],
+        )
+        self.assertEqual(
+            list(span.day_hours.order_by("hour__time").values_list("hour__time", flat=True)),
+            [time(16, 0), time(17, 0), time(18, 0)],
+        )
+
+        span.day_hours.clear()
+        call_command("create_time_spans")
+
+        self.assertEqual(TimeSpan.objects.count(), 6)
+        span.refresh_from_db()
+        self.assertEqual(span.day_hours.count(), 3)
+
+
+class AvailabilityViewTests(TestCase):
+    def setUp(self):
+        self.monday = Day.objects.create(name="Monday", order=1)
+        self.wednesday = Day.objects.create(name="Wednesday", order=3)
+        self.saturday = Day.objects.create(name="Saturday", order=6)
+        self.hours = [
+            Hour.objects.create(time=time(hour, 0)) for hour in (16, 17, 18, 19)
+        ]
+        for day in (self.monday, self.wednesday, self.saturday):
+            for hour_record in self.hours:
+                DayHour.objects.create(day=day, hour=hour_record)
+        call_command("create_time_spans")
+
+        game_type = GameType.objects.create(name="Board Game")
+        self.game = Game.objects.create(
+            name="Catan",
+            game_type=game_type,
+            expected_duration_hours=2,
+            min_players=1,
+        )
+        Game.objects.create(name="No Duration", game_type=game_type)
+
+        fully_available = Person.objects.create(name="Full", email="full@example.com")
+        fully_available.games.add(self.game)
+        fully_available.availability.add(
+            DayHour.objects.get(day=self.saturday, hour=self.hours[0]),
+            DayHour.objects.get(day=self.saturday, hour=self.hours[1]),
+        )
+
+        partially_available = Person.objects.create(
+            name="Partial", email="partial@example.com"
+        )
+        partially_available.games.add(self.game)
+        partially_available.availability.add(
+            DayHour.objects.get(day=self.saturday, hour=self.hours[0])
+        )
+
+        monday_available = Person.objects.create(
+            name="Monday", email="monday@example.com"
+        )
+        monday_available.games.add(self.game)
+        monday_available.availability.add(
+            DayHour.objects.get(day=self.monday, hour=self.hours[0]),
+            DayHour.objects.get(day=self.monday, hour=self.hours[1]),
+        )
+
+        second_saturday_person = Person.objects.create(
+            name="Second Saturday", email="second-saturday@example.com"
+        )
+        second_saturday_person.games.add(self.game)
+        second_saturday_person.availability.add(
+            DayHour.objects.get(day=self.saturday, hour=self.hours[0]),
+            DayHour.objects.get(day=self.saturday, hour=self.hours[1]),
+        )
+
+    def test_counts_only_people_available_for_entire_valid_time_span(self):
+        response = self.client.get(reverse("availability"))
+
+        self.assertEqual(response.status_code, 200)
+        game_grids = response.context["game_grids"]
+        self.assertEqual(len(game_grids), 1)
+        self.assertEqual(game_grids[0]["game"], self.game)
+        self.assertEqual([row["hour"] for row in game_grids[0]["rows"]], [self.hours[0]])
+        cells = game_grids[0]["rows"][0]["cells"]
+        self.assertEqual([cell["count"] for cell in cells], [1, 0, 2])
+        self.assertEqual(
+            [cell["css_class"] for cell in cells],
+            ["availability-valid", "availability-low", "availability-best"],
+        )
+        self.assertEqual([person["name"] for person in cells[0]["people"]], ["Monday"])
+        self.assertEqual(cells[1]["people"], [])
+
+        span = TimeSpan.objects.get(
+            day=self.saturday,
+            start_hour=self.hours[0],
+            end_hour=self.hours[2],
+        )
+        self.assertEqual(span.duration_hours, 2)
+        self.assertEqual(span.day_hours.count(), 2)

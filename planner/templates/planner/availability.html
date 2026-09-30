@@ -1,0 +1,238 @@
+{% extends "planner/base.html" %}
+
+{% block title %}Availability | Event Planner{% endblock %}
+
+{% block extra_head %}
+        .availability-game {
+            margin-bottom: 2rem;
+        }
+
+        .availability-game h2 {
+            margin: 0;
+        }
+
+        .availability-game-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .availability-toggle {
+            padding: 0.35rem 0.75rem;
+            border: 1px solid #7d7d7d;
+            background: #f2f2f2;
+            color: #222;
+            cursor: pointer;
+        }
+
+        .availability-toggle:hover {
+            background: #e7e7e7;
+        }
+
+        .availability-grid {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .availability-grid th,
+        .availability-grid td {
+            padding: 0.65rem;
+            border: 1px solid #b9b9b9;
+            text-align: center;
+        }
+
+        .availability-grid th {
+            background: #e3e3e3;
+        }
+
+        .availability-grid th:first-child {
+            text-align: left;
+        }
+
+        .availability-grid .availability-low {
+            background: #f4cccc;
+            color: #222;
+        }
+
+        .availability-grid .availability-valid {
+            background: #d9ead3;
+            color: #222;
+        }
+
+        .availability-grid .availability-best {
+            background: #cfe2f3;
+            color: #222;
+        }
+
+        .availability-count {
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: #1d3f75;
+            font: inherit;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .availability-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            background: rgba(0, 0, 0, 0.72);
+        }
+
+        .availability-modal[hidden] {
+            display: none;
+        }
+
+        .availability-modal-content {
+            position: relative;
+            width: min(560px, 100%);
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 1.5rem;
+            border-radius: 12px;
+            background: #fff;
+            color: #111;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+        }
+
+        .availability-modal-content h2 {
+            margin-top: 0;
+        }
+
+        .availability-modal-close {
+            position: absolute;
+            top: 0.75rem;
+            right: 0.75rem;
+            border: none;
+            background: none;
+            font-size: 1.75rem;
+            line-height: 1;
+            cursor: pointer;
+        }
+
+        @media (max-width: 900px) {
+            .availability-grid {
+                display: block;
+                overflow-x: auto;
+            }
+        }
+{% endblock %}
+
+{% block content %}
+    <h1>Availability</h1>
+    <p>Interested people available for each possible game start time ending by 6:00 PM.</p>
+
+    {% for game_grid in game_grids %}
+        <section class="availability-game">
+            <div class="availability-game-header">
+                <h2>{{ game_grid.game.name }} &mdash; {{ game_grid.game.expected_duration_hours }} hour{{ game_grid.game.expected_duration_hours|pluralize }}</h2>
+                <button class="availability-toggle" type="button" aria-expanded="false" aria-controls="availability-grid-{{ game_grid.game.pk }}">Show</button>
+            </div>
+            <table class="availability-grid" id="availability-grid-{{ game_grid.game.pk }}" hidden>
+                <thead>
+                    <tr>
+                        <th>Start Time</th>
+                        {% for day in days %}
+                            <th>{{ day.name }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in game_grid.rows %}
+                        <tr>
+                            <th>{{ row.hour }}</th>
+                            {% for cell in row.cells %}
+                                <td class="{{ cell.css_class }}">
+                                    <button class="availability-count" type="button" data-cell-id="{{ cell.modal_id }}">{{ cell.count }}</button>
+                                </td>
+                            {% endfor %}
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="{{ days|length|add:1 }}">No TimeSpans ending by 6:00 PM are configured for this duration.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    {% empty %}
+        <p>No Games have an expected duration configured.</p>
+    {% endfor %}
+
+    {{ modal_cells|json_script:"availability-modal-cell-data" }}
+    <div class="availability-modal" id="availability-modal" role="dialog" aria-modal="true" aria-labelledby="availability-modal-game" hidden>
+        <section class="availability-modal-content">
+            <button class="availability-modal-close" type="button" aria-label="Close availability details">&times;</button>
+            <h2 id="availability-modal-game"></h2>
+            <p id="availability-modal-time-span"></p>
+            <p id="availability-modal-count"></p>
+            <p id="availability-modal-empty" hidden>No available people.</p>
+            <ul id="availability-modal-people"></ul>
+        </section>
+    </div>
+{% endblock %}
+
+{% block extra_script %}
+    <script>
+        document.querySelectorAll(".availability-toggle").forEach(button => {
+            button.addEventListener("click", () => {
+                const table = document.getElementById(button.getAttribute("aria-controls"));
+                const isHidden = table.hidden;
+                table.hidden = !isHidden;
+                button.setAttribute("aria-expanded", String(isHidden));
+                button.textContent = isHidden ? "Hide" : "Show";
+            });
+        });
+
+        const modal = document.getElementById("availability-modal");
+        const modalCellData = new Map(
+            JSON.parse(document.getElementById("availability-modal-cell-data").textContent)
+                .map(cell => [cell.id, cell])
+        );
+        const modalGame = document.getElementById("availability-modal-game");
+        const modalTimeSpan = document.getElementById("availability-modal-time-span");
+        const modalCount = document.getElementById("availability-modal-count");
+        const modalEmpty = document.getElementById("availability-modal-empty");
+        const modalPeople = document.getElementById("availability-modal-people");
+
+        const closeModal = () => {
+            modal.hidden = true;
+        };
+
+        document.querySelectorAll(".availability-count").forEach(button => {
+            button.addEventListener("click", () => {
+                const cell = modalCellData.get(button.dataset.cellId);
+                modalGame.textContent = cell.game_name;
+                modalTimeSpan.textContent = cell.end_hour
+                    ? `${cell.day_name}, ${cell.start_hour} – ${cell.end_hour}`
+                    : `${cell.day_name}, ${cell.start_hour}`;
+                modalCount.textContent = `${cell.count} available ${cell.count === 1 ? "person" : "people"}`;
+                modalEmpty.hidden = cell.people.length !== 0;
+                modalPeople.replaceChildren();
+                cell.people.forEach(name => {
+                    const item = document.createElement("li");
+                    item.textContent = name;
+                    modalPeople.appendChild(item);
+                });
+                modal.hidden = false;
+            });
+        });
+
+        modal.querySelector(".availability-modal-close").addEventListener("click", closeModal);
+        modal.addEventListener("click", event => {
+            if (event.target === modal) {
+                closeModal();
+            }
+        });
+        document.addEventListener("keydown", event => {
+            if (event.key === "Escape" && !modal.hidden) {
+                closeModal();
+            }
+        });
+    </script>
+{% endblock %}

@@ -13,6 +13,7 @@ from .models import (
     GameType,
     Platform,
     Day,
+    TimeSpan,
     FormQuestionGroupChoice,
     Duration
 )
@@ -126,9 +127,23 @@ class GameTypeAdmin(admin.ModelAdmin):
 
 @admin.register(Game)
 class GameAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "game_type", "url")
+    list_display = (
+        "id",
+        "name",
+        "game_type",
+        "expected_duration_hours",
+        "min_players",
+        "max_players",
+        "url",
+    )
+
     list_filter = ("game_type",)
-    search_fields = ("name", "game_type__name")
+
+    search_fields = (
+        "name",
+        "game_type__name",
+    )
+
     ordering = ("name",)
 
 
@@ -164,6 +179,14 @@ class DayAdmin(admin.ModelAdmin):
     ordering = (
         "order",
     )
+
+
+@admin.register(TimeSpan)
+class TimeSpanAdmin(admin.ModelAdmin):
+    list_display = ("id", "day", "start_hour", "end_hour")
+    list_filter = ("day",)
+    ordering = ("day__order", "start_hour__time", "end_hour__time")
+    filter_horizontal = ("day_hours",)
 
 
 @admin.register(FormQuestionGroupChoice)
@@ -207,4 +230,3 @@ class DurationAdmin(admin.ModelAdmin):
     ordering = (
         "days",
     )
-
