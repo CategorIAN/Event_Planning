@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-
 from django.db import models
 from django.utils import timezone
 
@@ -444,6 +443,74 @@ class FormQuestionGroupChoice(models.Model):
 
     def __str__(self):
         return f"{self.google_value} → {self.day or '(unmapped)'}"
+
+
+class Event(models.Model):
+    timestamp = models.DateTimeField()
+
+    time_span = models.ForeignKey(
+        TimeSpan,
+        on_delete=models.PROTECT,
+        related_name="events",
+    )
+
+    game = models.ForeignKey(
+        Game,
+        on_delete=models.PROTECT,
+        related_name="events",
+    )
+
+    happened = models.BooleanField(
+        null=True,
+        blank=True,
+        default=None,
+    )
+
+    def __str__(self):
+        timestamp = self.timestamp.strftime(
+            "%A, %B %d, %Y at %I:%M %p"
+        ).replace(" 0", " ")
+
+        return f"{self.game} — {timestamp}"
+
+
+class Invitation(models.Model):
+    class Result(models.TextChoices):
+        PENDING = "pending", "Pending"
+        DECLINED = "declined", "Declined"
+        ATTENDING = "attending", "Attending"
+        ATTENDED = "attended", "Attended"
+        FLAKED = "flaked", "Flaked"
+        WAITING = "waiting", "Waiting"
+
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="invitations",
+    )
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.PROTECT,
+        related_name="invitations",
+    )
+    invited_at = models.DateTimeField()
+    plus_ones = models.PositiveSmallIntegerField(default=0)
+    result = models.CharField(
+        max_length=20,
+        choices=Result.choices,
+        default=Result.PENDING,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "person"],
+                name="unique_person_event_invitation",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.person} — {self.event}"
 
 
 

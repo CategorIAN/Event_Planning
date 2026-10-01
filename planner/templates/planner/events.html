@@ -1,0 +1,225 @@
+{% extends "planner/base.html" %}
+
+{% block title %}Events | Event Planner{% endblock %}
+
+{% block extra_head %}
+        .events-header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: end;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .action-button {
+            padding: 0.5rem 0.8rem;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #222;
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .event-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            background: rgba(0, 0, 0, 0.72);
+        }
+
+        .event-modal[hidden] {
+            display: none;
+        }
+
+        .event-modal-content {
+            position: relative;
+            width: min(560px, 100%);
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 1.5rem;
+            border-radius: 12px;
+            background: #fff;
+            color: #111;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+        }
+
+        .event-modal-close {
+            position: absolute;
+            top: 0.75rem;
+            right: 0.75rem;
+            border: none;
+            background: none;
+            font-size: 1.75rem;
+            line-height: 1;
+            cursor: pointer;
+        }
+
+        .event-form {
+            display: grid;
+            gap: 0.9rem;
+        }
+
+        .event-form label {
+            display: grid;
+            gap: 0.3rem;
+            font-weight: 600;
+        }
+
+        .errorlist {
+            margin: 0;
+            padding-left: 1.2rem;
+            color: #9b1c1c;
+        }
+
+        .event-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.75rem 1rem;
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            border: 1px solid #b9b9b9;
+            background: #f7f7f7;
+        }
+
+        .event-details dt {
+            font-weight: 700;
+        }
+
+        .event-details dd {
+            margin: 0.25rem 0 0;
+        }
+
+        .invitation-list {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .invitation-list th,
+        .invitation-list td {
+            padding: 0.7rem;
+            border: 1px solid #b9b9b9;
+            text-align: left;
+        }
+
+        .invitation-list th {
+            background: #e3e3e3;
+        }
+
+        @media (max-width: 900px) {
+            .invitation-list {
+                display: block;
+                overflow-x: auto;
+            }
+        }
+{% endblock %}
+
+{% block content %}
+    <div class="events-header">
+        <h1>Events</h1>
+        <button class="action-button" id="open-event-modal" type="button">Add Event</button>
+    </div>
+
+    {% for message in messages %}
+        <p>{{ message }}</p>
+    {% endfor %}
+
+    {% if events %}
+        <form class="events-header" method="get">
+            <label>
+                Event
+                <select name="event_id" onchange="this.form.submit()">
+                    {% for event in events %}
+                        <option value="{{ event.pk }}" {% if event.pk == selected_event.pk %}selected{% endif %}>{{ event }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <noscript><button type="submit">Select</button></noscript>
+        </form>
+
+        <dl class="event-details">
+            <div><dt>Game</dt><dd>{{ selected_event.game }}</dd></div>
+            <div><dt>Event date/time</dt><dd>{{ selected_event.timestamp|date:"M j, Y, g:i A T" }}</dd></div>
+            <div><dt>TimeSpan</dt><dd>{{ selected_event.time_span }}</dd></div>
+            <div><dt>Game min players</dt><dd>{{ selected_event.game.min_players|default:"Not set" }}</dd></div>
+            <div><dt>Game max players</dt><dd>{{ selected_event.game.max_players|default:"Not set" }}</dd></div>
+        </dl>
+
+        <h2>Invitation List</h2>
+        <table class="invitation-list">
+            <thead>
+                <tr>
+                    <th>Person</th>
+                    <th>Invited</th>
+                    <th>Redeem</th>
+                    <th>New</th>
+                    <th>Completed Survey</th>
+                    <th>Expected Attendance</th>
+                    <th>Expected Invite</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in invitation_rows %}
+                    <tr>
+                        <td>{{ row.person.name }}</td>
+                        <td>{% if row.invited %}Yes{% else %}No{% endif %}</td>
+                        <td>{% if row.redeem %}Yes{% else %}No{% endif %}</td>
+                        <td>{% if row.new %}Yes{% else %}No{% endif %}</td>
+                        <td>{% if row.completed_survey %}Yes{% else %}No{% endif %}</td>
+                        <td>{% if row.expected_attendance %}{{ row.expected_attendance|date:"M j, Y, g:i A T" }}{% else %}Never{% endif %}</td>
+                        <td>{% if row.expected_invite %}{{ row.expected_invite|date:"M j, Y, g:i A T" }}{% else %}Never{% endif %}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7">No eligible people are currently due for this invitation list.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No Events have been created yet.</p>
+    {% endif %}
+
+    <div class="event-modal" id="event-modal" role="dialog" aria-modal="true" aria-labelledby="event-modal-title" {% if not event_form.errors %}hidden{% endif %}>
+        <section class="event-modal-content">
+            <button class="event-modal-close" type="button" aria-label="Close add event form">&times;</button>
+            <h2 id="event-modal-title">Add Event</h2>
+            <form class="event-form" method="post" action="{% url 'create_event' %}">
+                {% csrf_token %}
+                {{ event_form.non_field_errors }}
+                {% for field in event_form %}
+                    <label>
+                        {{ field.label }}
+                        {{ field }}
+                        {{ field.errors }}
+                    </label>
+                {% endfor %}
+                <button class="action-button" type="submit">Create Event</button>
+            </form>
+        </section>
+    </div>
+{% endblock %}
+
+{% block extra_script %}
+    <script>
+        const eventModal = document.getElementById("event-modal");
+        const closeEventModal = () => { eventModal.hidden = true; };
+
+        document.getElementById("open-event-modal").addEventListener("click", () => {
+            eventModal.hidden = false;
+        });
+        eventModal.querySelector(".event-modal-close").addEventListener("click", closeEventModal);
+        eventModal.addEventListener("click", event => {
+            if (event.target === eventModal) {
+                closeEventModal();
+            }
+        });
+        document.addEventListener("keydown", event => {
+            if (event.key === "Escape" && !eventModal.hidden) {
+                closeEventModal();
+            }
+        });
+    </script>
+{% endblock %}

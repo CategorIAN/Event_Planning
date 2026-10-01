@@ -22,6 +22,8 @@ from planner import views
 urlpatterns = [
     path('', views.home, name='home'),
     path('availability/', views.availability, name='availability'),
+    path('events/', views.events, name='events'),
+    path('events/create/', views.create_event, name='create_event'),
     path('form-submissions/', views.form_submissions, name='form_submissions'),
     path(
         'form-submissions/sync/',

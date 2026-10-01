@@ -13,8 +13,9 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from planner.forms import SendSurveyRequestForm
-from planner.models import Day, Form, FormRequest, FormSubmission, Game, Hour, Person, TimeSpan
+from planner.forms import EventForm, SendSurveyRequestForm
+from planner.models import Day, Event, Form, FormRequest, FormSubmission, Game, Hour, Person, TimeSpan
+from planner.services.availability import day_hour_ids, is_available_for_time_span
 from planner.services.form_response_sync import (
     FormResponseSynchronizationError,
     apply_form_submission_to_person,
@@ -22,6 +23,7 @@ from planner.services.form_response_sync import (
     synchronize_google_form_responses,
 )
 from planner.services.google_forms import GoogleFormsError
+from planner.services.invitation_list import get_invitation_list
 from planner.services.survey_updates import (
     DUE_STATUSES,
     STATUS_ORDER,
@@ -72,7 +74,7 @@ def availability(request: HttpRequest) -> HttpResponse:
             {
                 "id": person.pk,
                 "name": person.name,
-                "availability": {day_hour.pk for day_hour in person.availability.all()},
+                "availability": day_hour_ids(person.availability.all()),
             }
             for person in game.interested_people.all()
         ]
@@ -97,13 +99,10 @@ def availability(request: HttpRequest) -> HttpResponse:
                     continue
 
                 has_valid_span = True
-                required_day_hours = {
-                    day_hour.pk for day_hour in time_span.day_hours.all()
-                }
                 qualifying_people = [
                     person
                     for person in interested_people
-                    if required_day_hours <= person["availability"]
+                    if is_available_for_time_span(person["availability"], time_span)
                 ]
                 cells.append(
                     {
@@ -171,6 +170,53 @@ def _availability_cell_class(
     if count == maximum_count:
         return "availability-best"
     return "availability-valid"
+
+
+def events(request: HttpRequest) -> HttpResponse:
+    return _render_events_page(request, EventForm())
+
+
+@require_POST
+def create_event(request: HttpRequest) -> HttpResponse:
+    event_form = EventForm(request.POST)
+    if event_form.is_valid():
+        event = event_form.save()
+        messages.success(request, "Event created.")
+        return redirect(f"{reverse('events')}?{urlencode({'event_id': event.pk})}")
+    return _render_events_page(request, event_form, status=400)
+
+
+def _render_events_page(
+    request: HttpRequest,
+    event_form: EventForm,
+    *,
+    status: int = 200,
+) -> HttpResponse:
+    event_choices = list(
+        Event.objects.select_related("game", "time_span__day", "time_span__start_hour", "time_span__end_hour")
+        .order_by("-timestamp")
+    )
+    selected_event = None
+    if event_choices:
+        selected_event_id = request.GET.get("event_id")
+        if selected_event_id:
+            selected_event = get_object_or_404(Event, pk=selected_event_id)
+        else:
+            selected_event = event_choices[0]
+
+    return render(
+        request,
+        "planner/events.html",
+        {
+            "events": event_choices,
+            "selected_event": selected_event,
+            "event_form": event_form,
+            "invitation_rows": (
+                get_invitation_list(selected_event) if selected_event is not None else []
+            ),
+        },
+        status=status,
+    )
 
 
 def form_submissions(request: HttpRequest) -> HttpResponse:

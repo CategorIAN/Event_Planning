@@ -1,5 +1,5 @@
 import base64
-from datetime import datetime, time, timezone as datetime_timezone
+from datetime import datetime, time, timedelta, timezone as datetime_timezone
 from email import message_from_bytes
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +11,7 @@ from django.db import DatabaseError
 from planner.models import (
     Day,
     DayHour,
+    Event,
     Form,
     FormRequest,
     FormSubmission,
@@ -19,7 +20,9 @@ from planner.models import (
     Hour,
     Person,
     TimeSpan,
+    Invitation,
 )
+from planner.services.invitation_list import get_invitation_list
 from planner.services.survey_updates import (
     AWAITING_RESPONSE,
     CURRENT,
@@ -533,3 +536,125 @@ class AvailabilityViewTests(TestCase):
         )
         self.assertEqual(span.duration_hours, 2)
         self.assertEqual(span.day_hours.count(), 2)
+
+
+@override_settings(GENERAL_SURVEY_FORM_ID="general-survey")
+class InvitationListServiceTests(TestCase):
+    def setUp(self):
+        self.now = aware(2026, 10, 1)
+        self.day = Day.objects.create(name="Saturday", order=6)
+        self.start_hour = Hour.objects.create(time=time(16, 0))
+        self.end_hour = Hour.objects.create(time=time(18, 0))
+        self.required_day_hours = [
+            DayHour.objects.create(day=self.day, hour=self.start_hour),
+            DayHour.objects.create(day=self.day, hour=Hour.objects.create(time=time(17, 0))),
+        ]
+        self.time_span = TimeSpan.objects.create(
+            day=self.day,
+            start_hour=self.start_hour,
+            end_hour=self.end_hour,
+        )
+        self.time_span.day_hours.set(self.required_day_hours)
+        game_type = GameType.objects.create(name="Board Game")
+        self.game = Game.objects.create(name="Catan", game_type=game_type)
+        self.event = Event.objects.create(
+            game=self.game,
+            time_span=self.time_span,
+            timestamp=self.now + timedelta(days=7),
+        )
+        self.general_survey = Form.objects.create(
+            name="Tabletop Gaming General Survey",
+            google_form_id="general-survey",
+        )
+
+        self.new_person = self._eligible_person("New Person")
+        FormSubmission.objects.create(
+            form=self.general_survey,
+            person=self.new_person,
+            google_response_id="new-survey",
+            submitted_at=self.now,
+            raw_response_data={},
+        )
+
+        self.attending_person = self._eligible_person("Attending Person")
+        past_event = Event.objects.create(
+            game=self.game,
+            time_span=self.time_span,
+            timestamp=self.now - timedelta(days=30),
+        )
+        Invitation.objects.create(
+            event=past_event,
+            person=self.attending_person,
+            invited_at=self.now - timedelta(days=20),
+            result=Invitation.Result.ATTENDED,
+        )
+
+        self.redeem_person = self._eligible_person("Redeem Person")
+        Invitation.objects.create(
+            event=self.event,
+            person=self.redeem_person,
+            invited_at=self.now - timedelta(days=1),
+            result=Invitation.Result.WAITING,
+        )
+
+        unavailable_person = Person.objects.create(
+            name="Unavailable Person", email="unavailable@example.com"
+        )
+        unavailable_person.games.add(self.game)
+        unavailable_person.availability.add(self.required_day_hours[0])
+
+    def _eligible_person(self, name):
+        person = Person.objects.create(name=name, email=f"{name.lower().replace(' ', '')}@example.com")
+        person.games.add(self.game)
+        person.availability.add(*self.required_day_hours)
+        return person
+
+    def test_builds_and_orders_derived_invitation_rows(self):
+        rows = get_invitation_list(self.event)
+        rows_by_name = {row.person.name: row for row in rows}
+
+        self.assertEqual(
+            [row.person.name for row in rows],
+            ["New Person", "Attending Person", "Redeem Person"],
+        )
+        self.assertNotIn("Unavailable Person", rows_by_name)
+
+        new_row = rows_by_name["New Person"]
+        self.assertTrue(new_row.new)
+        self.assertTrue(new_row.completed_survey)
+        self.assertFalse(new_row.invited)
+
+        attending_row = rows_by_name["Attending Person"]
+        self.assertEqual(
+            attending_row.expected_attendance,
+            self.now - timedelta(days=23),
+        )
+
+        redeem_row = rows_by_name["Redeem Person"]
+        self.assertTrue(redeem_row.redeem)
+        self.assertTrue(redeem_row.invited)
+        self.assertEqual(redeem_row.expected_invite, self.now + timedelta(days=6))
+
+    def test_events_page_displays_selected_event_and_invitation_list(self):
+        response = self.client.get(reverse("events"), {"event_id": self.event.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_event"], self.event)
+        self.assertContains(response, "Invitation List")
+        self.assertContains(response, "New Person")
+
+    def test_create_event_post_creates_and_selects_event(self):
+        response = self.client.post(
+            reverse("create_event"),
+            {
+                "game": self.game.pk,
+                "time_span": self.time_span.pk,
+                "timestamp": "2026-10-15T16:00",
+                "happened": "",
+            },
+        )
+
+        created_event = Event.objects.get(timestamp=aware(2026, 10, 15, 16))
+        self.assertRedirects(response, f"/events/?event_id={created_event.pk}")
+        self.assertEqual(created_event.game, self.game)
+        self.assertEqual(created_event.time_span, self.time_span)
