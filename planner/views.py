@@ -193,14 +193,29 @@ def _render_events_page(
     status: int = 200,
 ) -> HttpResponse:
     event_choices = list(
-        Event.objects.select_related("game", "time_span__day", "time_span__start_hour", "time_span__end_hour")
+        Event.objects.select_related(
+            "game",
+            "leader",
+            "time_span__day",
+            "time_span__start_hour",
+            "time_span__end_hour",
+        )
         .order_by("-timestamp")
     )
     selected_event = None
     if event_choices:
         selected_event_id = request.GET.get("event_id")
         if selected_event_id:
-            selected_event = get_object_or_404(Event, pk=selected_event_id)
+            selected_event = get_object_or_404(
+                Event.objects.select_related(
+                    "game",
+                    "leader",
+                    "time_span__day",
+                    "time_span__start_hour",
+                    "time_span__end_hour",
+                ),
+                pk=selected_event_id,
+            )
         else:
             selected_event = event_choices[0]
 

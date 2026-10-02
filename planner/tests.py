@@ -8,6 +8,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.db import DatabaseError
 
+from planner.forms import EventForm
 from planner.models import (
     Day,
     DayHour,
@@ -538,7 +539,6 @@ class AvailabilityViewTests(TestCase):
         self.assertEqual(span.day_hours.count(), 2)
 
 
-@override_settings(GENERAL_SURVEY_FORM_ID="general-survey")
 class InvitationListServiceTests(TestCase):
     def setUp(self):
         self.now = aware(2026, 10, 1)
@@ -557,30 +557,30 @@ class InvitationListServiceTests(TestCase):
         self.time_span.day_hours.set(self.required_day_hours)
         game_type = GameType.objects.create(name="Board Game")
         self.game = Game.objects.create(name="Catan", game_type=game_type)
+        self.owner = Person.objects.create(
+            name="Owner", email="owner@example.com", role=Person.Role.OWNER
+        )
+        self.leader = Person.objects.create(
+            name="Leader", email="leader@example.com"
+        )
+        self.owner.games.add(self.game)
+        self.owner.availability.add(*self.required_day_hours)
+        self.leader.games.add(self.game)
+        self.leader.availability.add(*self.required_day_hours)
         self.event = Event.objects.create(
             game=self.game,
             time_span=self.time_span,
             timestamp=self.now + timedelta(days=7),
+            leader=self.leader,
         )
-        self.general_survey = Form.objects.create(
-            name="Tabletop Gaming General Survey",
-            google_form_id="general-survey",
-        )
-
         self.new_person = self._eligible_person("New Person")
-        FormSubmission.objects.create(
-            form=self.general_survey,
-            person=self.new_person,
-            google_response_id="new-survey",
-            submitted_at=self.now,
-            raw_response_data={},
-        )
 
         self.attending_person = self._eligible_person("Attending Person")
         past_event = Event.objects.create(
             game=self.game,
             time_span=self.time_span,
             timestamp=self.now - timedelta(days=30),
+            leader=self.owner,
         )
         Invitation.objects.create(
             event=past_event,
@@ -597,11 +597,39 @@ class InvitationListServiceTests(TestCase):
             result=Invitation.Result.WAITING,
         )
 
+        self.recently_invited_person = self._eligible_person("Recent Invite")
+        Invitation.objects.create(
+            event=past_event,
+            person=self.recently_invited_person,
+            invited_at=self.now - timedelta(days=1),
+            result=Invitation.Result.PENDING,
+        )
+
+        self.not_due_for_selected_event = self._eligible_person("Not Due Yet")
+        self.not_due_for_selected_event.event_cooldown = timedelta(days=10)
+        self.not_due_for_selected_event.save(update_fields=["event_cooldown"])
+        recent_attendance_event = Event.objects.create(
+            game=self.game,
+            time_span=self.time_span,
+            timestamp=self.now,
+            leader=self.owner,
+        )
+        Invitation.objects.create(
+            event=recent_attendance_event,
+            person=self.not_due_for_selected_event,
+            invited_at=self.now - timedelta(days=1),
+            result=Invitation.Result.ATTENDED,
+        )
+
         unavailable_person = Person.objects.create(
             name="Unavailable Person", email="unavailable@example.com"
         )
         unavailable_person.games.add(self.game)
         unavailable_person.availability.add(self.required_day_hours[0])
+
+        self.not_now_person = self._eligible_person("Not Now Person")
+        self.not_now_person.status = Person.Status.NOT_NOW
+        self.not_now_person.save(update_fields=["status"])
 
     def _eligible_person(self, name):
         person = Person.objects.create(name=name, email=f"{name.lower().replace(' ', '')}@example.com")
@@ -615,14 +643,19 @@ class InvitationListServiceTests(TestCase):
 
         self.assertEqual(
             [row.person.name for row in rows],
-            ["New Person", "Attending Person", "Redeem Person"],
+            ["New Person", "Attending Person", "Recent Invite", "Redeem Person"],
         )
         self.assertNotIn("Unavailable Person", rows_by_name)
+        self.assertNotIn("Not Due Yet", rows_by_name)
+        self.assertNotIn("Not Now Person", rows_by_name)
+        self.assertNotIn("Owner", rows_by_name)
+        self.assertNotIn("Leader", rows_by_name)
 
         new_row = rows_by_name["New Person"]
         self.assertTrue(new_row.new)
-        self.assertTrue(new_row.completed_survey)
         self.assertFalse(new_row.invited)
+
+        self.assertFalse(rows_by_name["Recent Invite"].new)
 
         attending_row = rows_by_name["Attending Person"]
         self.assertEqual(
@@ -642,6 +675,15 @@ class InvitationListServiceTests(TestCase):
         self.assertEqual(response.context["selected_event"], self.event)
         self.assertContains(response, "Invitation List")
         self.assertContains(response, "New Person")
+        self.assertNotContains(response, "Completed Survey")
+        self.assertContains(response, "Leader")
+
+    def test_event_form_defaults_to_owner_but_preserves_existing_leader(self):
+        new_event_form = EventForm()
+        existing_event_form = EventForm(instance=self.event)
+
+        self.assertEqual(new_event_form["leader"].value(), self.owner.pk)
+        self.assertEqual(existing_event_form["leader"].value(), self.leader.pk)
 
     def test_create_event_post_creates_and_selects_event(self):
         response = self.client.post(
@@ -649,6 +691,7 @@ class InvitationListServiceTests(TestCase):
             {
                 "game": self.game.pk,
                 "time_span": self.time_span.pk,
+                "leader": self.leader.pk,
                 "timestamp": "2026-10-15T16:00",
                 "happened": "",
             },
@@ -658,3 +701,4 @@ class InvitationListServiceTests(TestCase):
         self.assertRedirects(response, f"/events/?event_id={created_event.pk}")
         self.assertEqual(created_event.game, self.game)
         self.assertEqual(created_event.time_span, self.time_span)
+        self.assertEqual(created_event.leader, self.leader)

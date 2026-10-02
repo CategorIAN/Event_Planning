@@ -212,6 +212,16 @@ class Person(models.Model):
         blank=True,
     )
 
+    class Role(models.TextChoices):
+        OWNER = "Owner", "Owner"
+        MEMBER = "Member", "Member"
+
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.MEMBER,
+    )
+
     def __str__(self):
         return self.name
 
@@ -464,6 +474,12 @@ class Event(models.Model):
         null=True,
         blank=True,
         default=None,
+    )
+
+    leader = models.ForeignKey(
+        Person,
+        on_delete=models.PROTECT,
+        related_name="led_events",
     )
 
     def __str__(self):

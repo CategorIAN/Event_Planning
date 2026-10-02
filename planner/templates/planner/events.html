@@ -145,6 +145,7 @@
             <div><dt>Game</dt><dd>{{ selected_event.game }}</dd></div>
             <div><dt>Event date/time</dt><dd>{{ selected_event.timestamp|date:"M j, Y, g:i A T" }}</dd></div>
             <div><dt>TimeSpan</dt><dd>{{ selected_event.time_span }}</dd></div>
+            <div><dt>Leader</dt><dd>{{ selected_event.leader }}</dd></div>
             <div><dt>Game min players</dt><dd>{{ selected_event.game.min_players|default:"Not set" }}</dd></div>
             <div><dt>Game max players</dt><dd>{{ selected_event.game.max_players|default:"Not set" }}</dd></div>
         </dl>
@@ -157,7 +158,6 @@
                     <th>Invited</th>
                     <th>Redeem</th>
                     <th>New</th>
-                    <th>Completed Survey</th>
                     <th>Expected Attendance</th>
                     <th>Expected Invite</th>
                 </tr>
@@ -169,12 +169,11 @@
                         <td>{% if row.invited %}Yes{% else %}No{% endif %}</td>
                         <td>{% if row.redeem %}Yes{% else %}No{% endif %}</td>
                         <td>{% if row.new %}Yes{% else %}No{% endif %}</td>
-                        <td>{% if row.completed_survey %}Yes{% else %}No{% endif %}</td>
                         <td>{% if row.expected_attendance %}{{ row.expected_attendance|date:"M j, Y, g:i A T" }}{% else %}Never{% endif %}</td>
                         <td>{% if row.expected_invite %}{{ row.expected_invite|date:"M j, Y, g:i A T" }}{% else %}Never{% endif %}</td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="7">No eligible people are currently due for this invitation list.</td></tr>
+                    <tr><td colspan="6">No eligible people are currently due for this invitation list.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

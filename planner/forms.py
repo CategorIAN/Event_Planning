@@ -26,7 +26,7 @@ class SendSurveyRequestForm(forms.Form):
 class EventForm(forms.ModelForm):
     class Meta:
         model = Event
-        fields = ("game", "timestamp", "time_span", "happened")
+        fields = ("game", "timestamp", "time_span", "leader", "happened")
         widgets = {
             "timestamp": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
@@ -37,7 +37,14 @@ class EventForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["game"].queryset = Game.objects.order_by("name")
+        self.fields["leader"].queryset = Person.objects.order_by("name")
         self.fields["time_span"].queryset = TimeSpan.objects.select_related(
             "day", "start_hour", "end_hour"
         ).order_by("day__order", "start_hour__time", "end_hour__time")
         self.fields["timestamp"].input_formats = ["%Y-%m-%dT%H:%M"]
+        if self.instance.pk is None and not self.is_bound:
+            owner = Person.objects.filter(role=Person.Role.OWNER).order_by(
+                "name", "pk"
+            ).first()
+            if owner is not None:
+                self.initial["leader"] = owner.pk
