@@ -135,6 +135,7 @@ class GameAdmin(admin.ModelAdmin):
         "min_players",
         "max_players",
         "url",
+        "boardgamegeek_url",
     )
 
     list_filter = ("game_type",)

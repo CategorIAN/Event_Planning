@@ -24,6 +24,13 @@ from planner.models import (
     Invitation,
 )
 from planner.services.invitation_list import get_invitation_list
+from planner.services.event_invitations import (
+    EventInvitationAlreadyExistsError,
+    EventInvitationIneligibleError,
+    build_event_invitation_email,
+    get_current_attendance,
+    send_event_invitation,
+)
 from planner.services.survey_updates import (
     AWAITING_RESPONSE,
     CURRENT,
@@ -702,3 +709,300 @@ class InvitationListServiceTests(TestCase):
         self.assertEqual(created_event.game, self.game)
         self.assertEqual(created_event.time_span, self.time_span)
         self.assertEqual(created_event.leader, self.leader)
+
+    @patch("planner.views.send_event_invitation")
+    def test_events_page_invite_action_uses_event_invitation_service(self, mocked_send):
+        mocked_send.return_value.message_id = "gmail-message-id"
+
+        response = self.client.post(
+            reverse(
+                "send_event_invitation_from_events",
+                args=[self.event.pk, self.new_person.pk],
+            )
+        )
+
+        self.assertRedirects(response, f"/events/?event_id={self.event.pk}")
+        mocked_send.assert_called_once_with(self.event, self.new_person)
+
+    def _create_board_invitation(self, name, result, plus_ones=0):
+        person = Person.objects.create(
+            name=name,
+            email=f"{name.lower().replace(' ', '')}@example.com",
+        )
+        return Invitation.objects.create(
+            event=self.event,
+            person=person,
+            invited_at=aware(2026, 10, 1),
+            result=result,
+            plus_ones=plus_ones,
+        )
+
+    def test_active_invitations_board_has_all_results_and_only_selected_event(self):
+        board_invitations = {
+            value: self._create_board_invitation(label, value)
+            for value, label in Invitation.Result.choices
+        }
+        other_event = Event.objects.create(
+            game=self.game,
+            time_span=self.time_span,
+            timestamp=self.now + timedelta(days=8),
+            leader=self.leader,
+        )
+        other_person = Person.objects.create(
+            name="Other Event Person", email="other-event@example.com"
+        )
+        Invitation.objects.create(
+            event=other_event,
+            person=other_person,
+            invited_at=aware(2026, 10, 1),
+            result=Invitation.Result.PENDING,
+        )
+
+        response = self.client.get(reverse("events"), {"event_id": self.event.pk})
+        columns = {column["value"]: column for column in response.context["invitation_columns"]}
+
+        self.assertEqual(set(columns), set(Invitation.Result.values))
+        for value, label in Invitation.Result.choices:
+            self.assertContains(response, label)
+            invitation = board_invitations[value]
+            self.assertIn(invitation, columns[value]["invitations"])
+        self.assertNotIn(
+            other_person,
+            [
+                invitation
+                for column in columns.values()
+                for invitation in column["invitations"]
+            ],
+        )
+
+    def test_invitation_result_update_validates_event_and_result(self):
+        invitation = self._create_board_invitation("Pending Person", Invitation.Result.PENDING)
+
+        response = self.client.post(
+            reverse(
+                "update_event_invitation_result",
+                args=[self.event.pk, invitation.pk],
+            ),
+            {"result": Invitation.Result.ATTENDING},
+        )
+        self.assertEqual(response.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.result, Invitation.Result.ATTENDING)
+
+        response = self.client.post(
+            reverse(
+                "update_event_invitation_result",
+                args=[self.event.pk, invitation.pk],
+            ),
+            {"result": "invalid"},
+        )
+        self.assertEqual(response.status_code, 400)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.result, Invitation.Result.ATTENDING)
+
+        other_event = Event.objects.create(
+            game=self.game,
+            time_span=self.time_span,
+            timestamp=self.now + timedelta(days=8),
+            leader=self.leader,
+        )
+        other_invitation = Invitation.objects.create(
+            event=other_event,
+            person=Person.objects.create(name="Other", email="other@example.com"),
+            invited_at=aware(2026, 10, 1),
+            result=Invitation.Result.PENDING,
+        )
+        response = self.client.post(
+            reverse(
+                "update_event_invitation_result",
+                args=[self.event.pk, other_invitation.pk],
+            ),
+            {"result": Invitation.Result.ATTENDING},
+        )
+        self.assertEqual(response.status_code, 400)
+        other_invitation.refresh_from_db()
+        self.assertEqual(other_invitation.result, Invitation.Result.PENDING)
+
+    def test_plus_one_updates_persist_and_cannot_go_below_zero(self):
+        invitation = self._create_board_invitation("Plus One Person", Invitation.Result.PENDING)
+        update_url = reverse(
+            "update_event_invitation_plus_ones",
+            args=[self.event.pk, invitation.pk],
+        )
+
+        response = self.client.post(update_url, {"delta": 1})
+        self.assertEqual(response.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.plus_ones, 1)
+
+        response = self.client.post(update_url, {"delta": -1})
+        self.assertEqual(response.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.plus_ones, 0)
+
+        response = self.client.post(update_url, {"delta": -1})
+        self.assertEqual(response.status_code, 400)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.plus_ones, 0)
+
+
+class EventInvitationServiceTests(TestCase):
+    def setUp(self):
+        self.day = Day.objects.create(name="Saturday", order=6)
+        self.start_hour = Hour.objects.create(time=time(16, 0))
+        self.end_hour = Hour.objects.create(time=time(18, 0))
+        self.required_day_hours = [
+            DayHour.objects.create(day=self.day, hour=self.start_hour),
+            DayHour.objects.create(
+                day=self.day,
+                hour=Hour.objects.create(time=time(17, 0)),
+            ),
+        ]
+        self.time_span = TimeSpan.objects.create(
+            day=self.day,
+            start_hour=self.start_hour,
+            end_hour=self.end_hour,
+        )
+        self.time_span.day_hours.set(self.required_day_hours)
+        game_type = GameType.objects.create(name="Board Game")
+        self.game = Game.objects.create(
+            name="Catan",
+            game_type=game_type,
+            max_players=6,
+            boardgamegeek_url="https://boardgamegeek.com/boardgame/13/catan",
+        )
+        self.leader = Person.objects.create(
+            name="Leader",
+            email="leader@example.com",
+            role=Person.Role.OWNER,
+        )
+        self.event = Event.objects.create(
+            game=self.game,
+            time_span=self.time_span,
+            timestamp=aware(2026, 10, 17, 16),
+            leader=self.leader,
+        )
+        self.recipient = self._eligible_person("Recipient")
+        self.attending_person = self._eligible_person("Attending")
+        Invitation.objects.create(
+            event=self.event,
+            person=self.attending_person,
+            invited_at=aware(2026, 10, 1),
+            result=Invitation.Result.ATTENDING,
+            plus_ones=1,
+        )
+
+    def _eligible_person(self, name):
+        person = Person.objects.create(
+            name=name,
+            email=f"{name.lower()}@example.com",
+        )
+        person.games.add(self.game)
+        person.availability.add(*self.required_day_hours)
+        return person
+
+    def test_builds_email_with_event_details_attendance_and_links(self):
+        email = build_event_invitation_email(self.event, self.recipient)
+
+        self.assertIn("Catan", email.body)
+        self.assertIn("Saturday, October 17, 2026", email.body)
+        self.assertIn("4:00 PM", email.body)
+        self.assertIn("The Parlour, Sidney, MT", email.body)
+        self.assertIn("https://www.facebook.com/theparlour.mt/", email.body)
+        self.assertIn(self.game.boardgamegeek_url, email.body)
+        self.assertIn("3 people are currently going", email.body)
+        self.assertIn("looking for 3 more", email.body)
+        self.assertIn("welcome to bring a plus one", email.body)
+        self.assertIn("Please reply to this email", email.body)
+        self.assertIn("only reserved after you respond", email.body)
+
+    def test_plus_one_language_is_omitted_when_fewer_than_two_spots_remain(self):
+        self.game.max_players = 4
+        self.game.save(update_fields=["max_players"])
+
+        email = build_event_invitation_email(self.event, self.recipient)
+
+        self.assertEqual(email.remaining_spots, 1)
+        self.assertNotIn("welcome to bring a plus one", email.body)
+
+    def test_leader_and_attending_invitation_plus_ones_are_counted_once(self):
+        Invitation.objects.create(
+            event=self.event,
+            person=self.leader,
+            invited_at=aware(2026, 10, 1),
+            result=Invitation.Result.ATTENDING,
+            plus_ones=2,
+        )
+
+        self.assertEqual(get_current_attendance(self.event), 5)
+
+    def test_owner_who_is_also_leader_counts_as_one_automatic_attendee(self):
+        Invitation.objects.filter(event=self.event).delete()
+
+        self.assertEqual(get_current_attendance(self.event), 1)
+
+    def test_distinct_owner_and_leader_each_count_as_automatic_attendees(self):
+        Invitation.objects.filter(event=self.event).delete()
+        other_leader = Person.objects.create(
+            name="Other Leader", email="other-leader@example.com"
+        )
+        self.event.leader = other_leader
+        self.event.save(update_fields=["leader"])
+
+        self.assertEqual(get_current_attendance(self.event), 2)
+
+    def test_owner_and_leader_legacy_attending_invitations_do_not_double_count(self):
+        Invitation.objects.filter(event=self.event).delete()
+        other_leader = Person.objects.create(
+            name="Other Leader", email="other-leader@example.com"
+        )
+        self.event.leader = other_leader
+        self.event.save(update_fields=["leader"])
+        Invitation.objects.create(
+            event=self.event,
+            person=self.leader,
+            invited_at=aware(2026, 10, 1),
+            result=Invitation.Result.ATTENDING,
+            plus_ones=1,
+        )
+        Invitation.objects.create(
+            event=self.event,
+            person=other_leader,
+            invited_at=aware(2026, 10, 1),
+            result=Invitation.Result.ATTENDING,
+            plus_ones=2,
+        )
+
+        self.assertEqual(get_current_attendance(self.event), 5)
+
+    @patch("planner.services.event_invitations.send_email")
+    def test_sending_eligible_person_creates_pending_invitation_once(self, mocked_send):
+        mocked_send.return_value = "gmail-message-id"
+
+        result = send_event_invitation(self.event, self.recipient)
+
+        self.assertEqual(result.message_id, "gmail-message-id")
+        invitation = Invitation.objects.get(event=self.event, person=self.recipient)
+        self.assertEqual(invitation.result, Invitation.Result.PENDING)
+        self.assertNotEqual(invitation.result, Invitation.Result.ATTENDING)
+        mocked_send.assert_called_once_with(
+            self.recipient.email,
+            result.email.subject,
+            result.email.body,
+        )
+
+        with self.assertRaises(EventInvitationAlreadyExistsError):
+            send_event_invitation(self.event, self.recipient)
+        mocked_send.assert_called_once()
+
+    @patch("planner.services.event_invitations.send_email")
+    def test_ineligible_person_is_rejected_without_sending(self, mocked_send):
+        ineligible_person = Person.objects.create(
+            name="Ineligible", email="ineligible@example.com"
+        )
+
+        with self.assertRaises(EventInvitationIneligibleError):
+            send_event_invitation(self.event, ineligible_person)
+
+        mocked_send.assert_not_called()
+        self.assertFalse(Invitation.objects.filter(person=ineligible_person).exists())

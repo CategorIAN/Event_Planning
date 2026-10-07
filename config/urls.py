@@ -24,6 +24,21 @@ urlpatterns = [
     path('availability/', views.availability, name='availability'),
     path('events/', views.events, name='events'),
     path('events/create/', views.create_event, name='create_event'),
+    path(
+        'events/<int:event_id>/invitations/<int:person_id>/send/',
+        views.send_event_invitation_from_events,
+        name='send_event_invitation_from_events',
+    ),
+    path(
+        'events/<int:event_id>/invitations/<int:invitation_id>/result/',
+        views.update_event_invitation_result,
+        name='update_event_invitation_result',
+    ),
+    path(
+        'events/<int:event_id>/invitations/<int:invitation_id>/plus-ones/',
+        views.update_event_invitation_plus_ones,
+        name='update_event_invitation_plus_ones',
+    ),
     path('form-submissions/', views.form_submissions, name='form_submissions'),
     path(
         'form-submissions/sync/',

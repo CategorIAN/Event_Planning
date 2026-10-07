@@ -7,14 +7,14 @@ from django.conf import settings
 from django.contrib import messages
 from django.db import transaction
 from django.db.models import Max, Prefetch, Q
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from planner.forms import EventForm, SendSurveyRequestForm
-from planner.models import Day, Event, Form, FormRequest, FormSubmission, Game, Hour, Person, TimeSpan
+from planner.models import Day, Event, Form, FormRequest, FormSubmission, Game, Hour, Invitation, Person, TimeSpan
 from planner.services.availability import day_hour_ids, is_available_for_time_span
 from planner.services.form_response_sync import (
     FormResponseSynchronizationError,
@@ -23,6 +23,14 @@ from planner.services.form_response_sync import (
     synchronize_google_form_responses,
 )
 from planner.services.google_forms import GoogleFormsError
+from planner.services.event_invitations import (
+    EventInvitationError,
+    EventInvitationUpdateError,
+    adjust_invitation_plus_ones,
+    get_current_attendance,
+    send_event_invitation,
+    update_invitation_result as update_invitation_result_service,
+)
 from planner.services.invitation_list import get_invitation_list
 from planner.services.survey_updates import (
     DUE_STATUSES,
@@ -186,6 +194,67 @@ def create_event(request: HttpRequest) -> HttpResponse:
     return _render_events_page(request, event_form, status=400)
 
 
+@require_POST
+def send_event_invitation_from_events(
+    request: HttpRequest, event_id: int, person_id: int
+) -> HttpResponse:
+    event = get_object_or_404(Event, pk=event_id)
+    person = get_object_or_404(Person, pk=person_id)
+    try:
+        result = send_event_invitation(event, person)
+    except EventInvitationError as error:
+        messages.error(request, f"Invitation was not sent: {error}")
+    else:
+        messages.success(
+            request,
+            f"Invitation sent to {person.name} (Gmail message ID {result.message_id}).",
+        )
+    return redirect(f"{reverse('events')}?{urlencode({'event_id': event.pk})}")
+
+
+@require_POST
+def update_event_invitation_result(
+    request: HttpRequest, event_id: int, invitation_id: int
+) -> JsonResponse:
+    event = get_object_or_404(Event, pk=event_id)
+    try:
+        invitation = update_invitation_result_service(
+            event,
+            invitation_id,
+            request.POST.get("result", ""),
+        )
+    except EventInvitationUpdateError as error:
+        return JsonResponse({"error": str(error)}, status=400)
+    return JsonResponse(
+        {
+            "result": invitation.result,
+            "plus_ones": invitation.plus_ones,
+            "current_attendance": get_current_attendance(event),
+        }
+    )
+
+
+@require_POST
+def update_event_invitation_plus_ones(
+    request: HttpRequest, event_id: int, invitation_id: int
+) -> JsonResponse:
+    event = get_object_or_404(Event, pk=event_id)
+    try:
+        delta = int(request.POST.get("delta", ""))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Plus ones change must be a valid number."}, status=400)
+    try:
+        invitation = adjust_invitation_plus_ones(event, invitation_id, delta)
+    except EventInvitationUpdateError as error:
+        return JsonResponse({"error": str(error)}, status=400)
+    return JsonResponse(
+        {
+            "plus_ones": invitation.plus_ones,
+            "current_attendance": get_current_attendance(event),
+        }
+    )
+
+
 def _render_events_page(
     request: HttpRequest,
     event_form: EventForm,
@@ -229,9 +298,32 @@ def _render_events_page(
             "invitation_rows": (
                 get_invitation_list(selected_event) if selected_event is not None else []
             ),
+            "invitation_columns": _event_invitation_columns(selected_event),
+            "current_attendance": (
+                get_current_attendance(selected_event)
+                if selected_event is not None
+                else None
+            ),
         },
         status=status,
     )
+
+
+def _event_invitation_columns(event: Event | None) -> list[dict[str, object]]:
+    columns = [
+        {"value": value, "label": label, "invitations": []}
+        for value, label in Invitation.Result.choices
+    ]
+    if event is None:
+        return columns
+    invitations_by_result = {column["value"]: column["invitations"] for column in columns}
+    for invitation in (
+        Invitation.objects.filter(event=event)
+        .select_related("person")
+        .order_by("invited_at")
+    ):
+        invitations_by_result[invitation.result].append(invitation)
+    return columns
 
 
 def form_submissions(request: HttpRequest) -> HttpResponse:

@@ -110,6 +110,71 @@
             background: #e3e3e3;
         }
 
+        .active-invitations {
+            margin-top: 2rem;
+        }
+
+        .invitation-board {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(190px, 1fr));
+            gap: 0.75rem;
+            overflow-x: auto;
+            padding-bottom: 0.5rem;
+        }
+
+        .invitation-column {
+            min-height: 180px;
+            padding: 0.75rem;
+            border: 1px solid #b9b9b9;
+            background: #f7f7f7;
+        }
+
+        .invitation-column.drag-over {
+            background: #d9ead3;
+        }
+
+        .invitation-column h3 {
+            margin-top: 0;
+        }
+
+        .invitation-card {
+            margin-bottom: 0.6rem;
+            padding: 0.65rem;
+            border: 1px solid #8c8c8c;
+            border-radius: 6px;
+            background: #fff;
+            cursor: grab;
+        }
+
+        .invitation-card.dragging {
+            opacity: 0.5;
+        }
+
+        .invitation-card p {
+            margin: 0.35rem 0 0;
+            font-size: 0.9rem;
+        }
+
+        .plus-ones-controls {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .plus-ones-button {
+            width: 1.6rem;
+            height: 1.6rem;
+            padding: 0;
+            border: 1px solid #7d7d7d;
+            background: #f2f2f2;
+            cursor: pointer;
+        }
+
+        .board-message {
+            min-height: 1.2rem;
+            margin: 0.5rem 0;
+        }
+
         @media (max-width: 900px) {
             .invitation-list {
                 display: block;
@@ -160,6 +225,7 @@
                     <th>New</th>
                     <th>Expected Attendance</th>
                     <th>Expected Invite</th>
+                    <th>Invite</th>
                 </tr>
             </thead>
             <tbody>
@@ -171,12 +237,57 @@
                         <td>{% if row.new %}Yes{% else %}No{% endif %}</td>
                         <td>{% if row.expected_attendance %}{{ row.expected_attendance|date:"M j, Y, g:i A T" }}{% else %}Never{% endif %}</td>
                         <td>{% if row.expected_invite %}{{ row.expected_invite|date:"M j, Y, g:i A T" }}{% else %}Never{% endif %}</td>
+                        <td>
+                            <form method="post" action="{% url 'send_event_invitation_from_events' selected_event.pk row.person.pk %}">
+                                {% csrf_token %}
+                                <button class="action-button" type="submit">Invite</button>
+                            </form>
+                        </td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="6">No eligible people are currently due for this invitation list.</td></tr>
+                    <tr><td colspan="7">No eligible people are currently due for this invitation list.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
+
+        <section class="active-invitations">
+            <h2>Active Invitations</h2>
+            <p id="current-attendance">Current attendance: {{ current_attendance }}</p>
+            <p class="board-message" id="invitation-board-message" aria-live="polite"></p>
+            <form id="invitation-board-csrf" hidden>{% csrf_token %}</form>
+            <div class="invitation-board" id="invitation-board">
+                {% for column in invitation_columns %}
+                    <section class="invitation-column" data-result="{{ column.value }}">
+                        <h3>{{ column.label }}</h3>
+                        <div class="invitation-cards">
+                            {% for invitation in column.invitations %}
+                                <article
+                                    class="invitation-card"
+                                    draggable="true"
+                                    data-invitation-id="{{ invitation.pk }}"
+                                    data-result="{{ invitation.result }}"
+                                    data-result-url="{% url 'update_event_invitation_result' selected_event.pk invitation.pk %}"
+                                    data-plus-ones-url="{% url 'update_event_invitation_plus_ones' selected_event.pk invitation.pk %}"
+                                >
+                                    <strong>{{ invitation.person.name }}</strong>
+                                    <p>Invited: {{ invitation.invited_at|date:"M j, Y, g:i A T" }}</p>
+                                    <p>
+                                        Plus ones:
+                                        <span class="plus-ones-controls">
+                                            <button class="plus-ones-button" type="button" data-delta="-1" aria-label="Decrease plus ones">&#9660;</button>
+                                            <span class="plus-ones-count">{{ invitation.plus_ones }}</span>
+                                            <button class="plus-ones-button" type="button" data-delta="1" aria-label="Increase plus ones">&#9650;</button>
+                                        </span>
+                                    </p>
+                                </article>
+                            {% empty %}
+                                <p class="empty-invitation-column">No invitations.</p>
+                            {% endfor %}
+                        </div>
+                    </section>
+                {% endfor %}
+            </div>
+        </section>
     {% else %}
         <p>No Events have been created yet.</p>
     {% endif %}
@@ -220,5 +331,107 @@
                 closeEventModal();
             }
         });
+
+        {% if selected_event %}
+        const board = document.getElementById("invitation-board");
+        const boardMessage = document.getElementById("invitation-board-message");
+        const attendanceDisplay = document.getElementById("current-attendance");
+        const csrfToken = document.querySelector("#invitation-board-csrf input").value;
+        let draggedCard = null;
+
+        const showBoardMessage = message => {
+            boardMessage.textContent = message;
+        };
+
+        const reloadAfterBoardError = message => {
+            showBoardMessage(message + " Reloading the board.");
+            window.setTimeout(() => window.location.reload(), 1500);
+        };
+
+        const postBoardUpdate = async (url, data) => {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-CSRFToken": csrfToken,
+                },
+                body: new URLSearchParams(data),
+            });
+            const responseData = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(responseData.error || "The invitation could not be updated.");
+            }
+            return responseData;
+        };
+
+        document.querySelectorAll(".invitation-card").forEach(card => {
+            card.addEventListener("dragstart", event => {
+                draggedCard = card;
+                card.classList.add("dragging");
+                event.dataTransfer.effectAllowed = "move";
+            });
+            card.addEventListener("dragend", () => {
+                draggedCard = null;
+                card.classList.remove("dragging");
+                document.querySelectorAll(".invitation-column").forEach(column => {
+                    column.classList.remove("drag-over");
+                });
+            });
+        });
+
+        document.querySelectorAll(".invitation-column").forEach(column => {
+            column.addEventListener("dragover", event => {
+                event.preventDefault();
+                column.classList.add("drag-over");
+            });
+            column.addEventListener("dragleave", () => column.classList.remove("drag-over"));
+            column.addEventListener("drop", async event => {
+                event.preventDefault();
+                column.classList.remove("drag-over");
+                if (!draggedCard || draggedCard.dataset.result === column.dataset.result) {
+                    return;
+                }
+                try {
+                    const data = await postBoardUpdate(draggedCard.dataset.resultUrl, {
+                        result: column.dataset.result,
+                    });
+                    const previousCards = draggedCard.closest(".invitation-cards");
+                    const targetCards = column.querySelector(".invitation-cards");
+                    targetCards.querySelector(".empty-invitation-column")?.remove();
+                    targetCards.appendChild(draggedCard);
+                    if (!previousCards.querySelector(".invitation-card")) {
+                        const emptyMessage = document.createElement("p");
+                        emptyMessage.className = "empty-invitation-column";
+                        emptyMessage.textContent = "No invitations.";
+                        previousCards.appendChild(emptyMessage);
+                    }
+                    draggedCard.dataset.result = data.result;
+                    attendanceDisplay.textContent = `Current attendance: ${data.current_attendance}`;
+                    showBoardMessage("Invitation result updated.");
+                } catch (error) {
+                    reloadAfterBoardError(error.message);
+                }
+            });
+        });
+
+        document.querySelectorAll(".plus-ones-button").forEach(button => {
+            button.addEventListener("click", async () => {
+                const card = button.closest(".invitation-card");
+                button.disabled = true;
+                try {
+                    const data = await postBoardUpdate(card.dataset.plusOnesUrl, {
+                        delta: button.dataset.delta,
+                    });
+                    card.querySelector(".plus-ones-count").textContent = data.plus_ones;
+                    attendanceDisplay.textContent = `Current attendance: ${data.current_attendance}`;
+                    showBoardMessage("Plus ones updated.");
+                } catch (error) {
+                    reloadAfterBoardError(error.message);
+                } finally {
+                    button.disabled = false;
+                }
+            });
+        });
+        {% endif %}
     </script>
 {% endblock %}

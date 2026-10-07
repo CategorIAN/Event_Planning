@@ -115,6 +115,7 @@ class GameType(models.Model):
 class Game(models.Model):
     name = models.CharField(max_length=160, unique=True)
     url = models.URLField(blank=True)
+    boardgamegeek_url = models.URLField(blank=True)
 
     game_type = models.ForeignKey(
         GameType,
