@@ -1,12 +1,15 @@
 from difflib import SequenceMatcher
 from datetime import time as datetime_time
+from functools import wraps
 from urllib.parse import urlencode
 from uuid import uuid4
 
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth.views import redirect_to_login
 from django.db import transaction
 from django.db.models import Max, Prefetch, Q
+from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -49,10 +52,24 @@ SURVEY_REQUEST_ACTIONS_SESSION_KEY = "survey_request_actions"
 SURVEY_REQUEST_CONFIRMATION_SESSION_KEY = "survey_request_confirmation"
 
 
+def staff_required(view_func):
+    """Allow administrative views only for authenticated staff users."""
+    @wraps(view_func)
+    def wrapped_view(request: HttpRequest, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect_to_login(request.get_full_path())
+        if not request.user.is_active or not request.user.is_staff:
+            raise PermissionDenied("Staff access is required.")
+        return view_func(request, *args, **kwargs)
+
+    return wrapped_view
+
+
 def home(request: HttpRequest) -> HttpResponse:
     return render(request, "planner/home.html")
 
 
+@staff_required
 def availability(request: HttpRequest) -> HttpResponse:
     """Show qualified interested-person counts for each game TimeSpan."""
     days = list(Day.objects.exclude(name="Sunday").order_by("order"))
@@ -180,10 +197,12 @@ def _availability_cell_class(
     return "availability-valid"
 
 
+@staff_required
 def events(request: HttpRequest) -> HttpResponse:
     return _render_events_page(request, EventForm())
 
 
+@staff_required
 @require_POST
 def create_event(request: HttpRequest) -> HttpResponse:
     event_form = EventForm(request.POST)
@@ -194,6 +213,7 @@ def create_event(request: HttpRequest) -> HttpResponse:
     return _render_events_page(request, event_form, status=400)
 
 
+@staff_required
 @require_POST
 def send_event_invitation_from_events(
     request: HttpRequest, event_id: int, person_id: int
@@ -212,10 +232,11 @@ def send_event_invitation_from_events(
     return redirect(f"{reverse('events')}?{urlencode({'event_id': event.pk})}")
 
 
+@staff_required
 @require_POST
 def update_event_invitation_result(
     request: HttpRequest, event_id: int, invitation_id: int
-) -> JsonResponse:
+) -> HttpResponse:
     event = get_object_or_404(Event, pk=event_id)
     try:
         invitation = update_invitation_result_service(
@@ -224,7 +245,13 @@ def update_event_invitation_result(
             request.POST.get("result", ""),
         )
     except EventInvitationUpdateError as error:
+        if request.POST.get("next"):
+            messages.error(request, str(error))
+            return redirect(_events_url(event))
         return JsonResponse({"error": str(error)}, status=400)
+    if request.POST.get("next"):
+        messages.success(request, "Invitation result updated.")
+        return redirect(_events_url(event))
     return JsonResponse(
         {
             "result": invitation.result,
@@ -234,19 +261,29 @@ def update_event_invitation_result(
     )
 
 
+@staff_required
 @require_POST
 def update_event_invitation_plus_ones(
     request: HttpRequest, event_id: int, invitation_id: int
-) -> JsonResponse:
+) -> HttpResponse:
     event = get_object_or_404(Event, pk=event_id)
     try:
         delta = int(request.POST.get("delta", ""))
     except (TypeError, ValueError):
+        if request.POST.get("next"):
+            messages.error(request, "Plus ones change must be a valid number.")
+            return redirect(_events_url(event))
         return JsonResponse({"error": "Plus ones change must be a valid number."}, status=400)
     try:
         invitation = adjust_invitation_plus_ones(event, invitation_id, delta)
     except EventInvitationUpdateError as error:
+        if request.POST.get("next"):
+            messages.error(request, str(error))
+            return redirect(_events_url(event))
         return JsonResponse({"error": str(error)}, status=400)
+    if request.POST.get("next"):
+        messages.success(request, "Plus ones updated.")
+        return redirect(_events_url(event))
     return JsonResponse(
         {
             "plus_ones": invitation.plus_ones,
@@ -299,6 +336,7 @@ def _render_events_page(
                 get_invitation_list(selected_event) if selected_event is not None else []
             ),
             "invitation_columns": _event_invitation_columns(selected_event),
+            "invitation_result_choices": Invitation.Result.choices,
             "current_attendance": (
                 get_current_attendance(selected_event)
                 if selected_event is not None
@@ -326,6 +364,11 @@ def _event_invitation_columns(event: Event | None) -> list[dict[str, object]]:
     return columns
 
 
+def _events_url(event: Event) -> str:
+    return f"{reverse('events')}?{urlencode({'event_id': event.pk})}"
+
+
+@staff_required
 def form_submissions(request: HttpRequest) -> HttpResponse:
     unmatched_submissions = list(
         FormSubmission.objects.filter(person__isnull=True).order_by("submitted_at")
@@ -351,6 +394,7 @@ def form_submissions(request: HttpRequest) -> HttpResponse:
     )
 
 
+@staff_required
 @require_POST
 def sync_google_form_responses(request: HttpRequest) -> HttpResponse:
     try:
@@ -366,6 +410,7 @@ def sync_google_form_responses(request: HttpRequest) -> HttpResponse:
     return redirect("form_submissions")
 
 
+@staff_required
 @require_POST
 def create_person_from_submission(
     request: HttpRequest, submission_id: int
@@ -392,6 +437,7 @@ def create_person_from_submission(
     return redirect("form_submissions")
 
 
+@staff_required
 @require_POST
 def update_person_from_submission(
     request: HttpRequest, submission_id: int, person_id: int
@@ -418,6 +464,7 @@ def update_person_from_submission(
     return redirect("form_submissions")
 
 
+@staff_required
 def survey_updates(request: HttpRequest) -> HttpResponse:
     selected_form, form_error = _select_survey_form()
     due_only = request.GET.get("due_only") == "1"
@@ -428,6 +475,7 @@ def survey_updates(request: HttpRequest) -> HttpResponse:
     return render(request, "planner/survey_updates.html", context)
 
 
+@staff_required
 @require_POST
 def mark_survey_requested(request: HttpRequest) -> HttpResponse:
     request_form = SendSurveyRequestForm(request.POST)

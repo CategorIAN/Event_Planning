@@ -162,8 +162,8 @@
         }
 
         .plus-ones-button {
-            width: 1.6rem;
-            height: 1.6rem;
+            width: 2.75rem;
+            min-height: 2.75rem;
             padding: 0;
             border: 1px solid #7d7d7d;
             background: #f2f2f2;
@@ -175,10 +175,48 @@
             margin: 0.5rem 0;
         }
 
+        .invitation-result-form {
+            display: grid;
+            gap: 0.35rem;
+            margin-top: 0.65rem;
+        }
+
+        .invitation-result-form select,
+        .invitation-result-form button {
+            min-height: 2.5rem;
+            font: inherit;
+        }
+
+        .invitation-result-form button {
+            border: 1px solid #7d7d7d;
+            background: #f2f2f2;
+            color: #222;
+            cursor: pointer;
+        }
+
         @media (max-width: 900px) {
             .invitation-list {
                 display: block;
                 overflow-x: auto;
+            }
+        }
+
+        @media (max-width: 700px) {
+            .events-header {
+                align-items: stretch;
+            }
+
+            .action-button {
+                min-height: 2.75rem;
+            }
+
+            .invitation-board {
+                grid-template-columns: 1fr;
+                overflow-x: visible;
+            }
+
+            .invitation-column {
+                min-height: 0;
             }
         }
 {% endblock %}
@@ -279,6 +317,19 @@
                                             <button class="plus-ones-button" type="button" data-delta="1" aria-label="Increase plus ones">&#9650;</button>
                                         </span>
                                     </p>
+                                    <form class="invitation-result-form" method="post" action="{% url 'update_event_invitation_result' selected_event.pk invitation.pk %}">
+                                        {% csrf_token %}
+                                        <label>
+                                            Result
+                                            <select name="result">
+                                                {% for value, label in invitation_result_choices %}
+                                                    <option value="{{ value }}" {% if value == invitation.result %}selected{% endif %}>{{ label }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </label>
+                                        <input type="hidden" name="next" value="events">
+                                        <button type="submit">Update result</button>
+                                    </form>
                                 </article>
                             {% empty %}
                                 <p class="empty-invitation-column">No invitations.</p>

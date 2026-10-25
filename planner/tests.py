@@ -3,6 +3,7 @@ from datetime import datetime, time, timedelta, timezone as datetime_timezone
 from email import message_from_bytes
 from unittest.mock import MagicMock, patch
 
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -134,6 +135,12 @@ class SurveyUpdateScheduleTests(TestCase):
 @override_settings(GENERAL_SURVEY_FORM_ID="general-survey")
 class SurveyUpdatesViewTests(TestCase):
     def setUp(self):
+        self.staff_user = get_user_model().objects.create_user(
+            username="survey-staff",
+            password="test-password",
+            is_staff=True,
+        )
+        self.client.force_login(self.staff_user)
         self.general_form = Form.objects.create(
             name="General Survey",
             google_form_id="general-survey",
@@ -467,6 +474,12 @@ class CreateTimeSpansCommandTests(TestCase):
 
 class AvailabilityViewTests(TestCase):
     def setUp(self):
+        self.staff_user = get_user_model().objects.create_user(
+            username="availability-staff",
+            password="test-password",
+            is_staff=True,
+        )
+        self.client.force_login(self.staff_user)
         self.monday = Day.objects.create(name="Monday", order=1)
         self.wednesday = Day.objects.create(name="Wednesday", order=3)
         self.saturday = Day.objects.create(name="Saturday", order=6)
@@ -548,6 +561,12 @@ class AvailabilityViewTests(TestCase):
 
 class InvitationListServiceTests(TestCase):
     def setUp(self):
+        self.staff_user = get_user_model().objects.create_user(
+            username="event-staff",
+            password="test-password",
+            is_staff=True,
+        )
+        self.client.force_login(self.staff_user)
         self.now = aware(2026, 10, 1)
         self.day = Day.objects.create(name="Saturday", order=6)
         self.start_hour = Hour.objects.create(time=time(16, 0))
@@ -1006,3 +1025,120 @@ class EventInvitationServiceTests(TestCase):
 
         mocked_send.assert_not_called()
         self.assertFalse(Invitation.objects.filter(person=ineligible_person).exists())
+
+
+class AdministrativeAuthorizationTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.staff_user = user_model.objects.create_user(
+            username="staff-user",
+            password="test-password",
+            is_staff=True,
+        )
+        self.non_staff_user = user_model.objects.create_user(
+            username="regular-user",
+            password="test-password",
+        )
+
+        day = Day.objects.create(name="Saturday", order=6)
+        start_hour = Hour.objects.create(time=time(16, 0))
+        end_hour = Hour.objects.create(time=time(17, 0))
+        day_hour = DayHour.objects.create(day=day, hour=start_hour)
+        time_span = TimeSpan.objects.create(
+            day=day,
+            start_hour=start_hour,
+            end_hour=end_hour,
+        )
+        time_span.day_hours.add(day_hour)
+        game = Game.objects.create(
+            name="Authorization Game",
+            game_type=GameType.objects.create(name="Authorization Game Type"),
+        )
+        leader = Person.objects.create(name="Leader", email="leader@example.com")
+        self.event = Event.objects.create(
+            game=game,
+            time_span=time_span,
+            timestamp=aware(2026, 11, 1, 16),
+            leader=leader,
+        )
+        self.invitation = Invitation.objects.create(
+            event=self.event,
+            person=Person.objects.create(name="Invitee", email="invitee@example.com"),
+            invited_at=aware(2026, 10, 1),
+        )
+
+    def test_anonymous_users_are_redirected_from_administrative_pages_and_updates(self):
+        home_response = self.client.get(reverse("home"))
+        self.assertContains(home_response, "Login")
+        self.assertNotContains(home_response, 'href="/events/"')
+
+        for page_name in ("events", "availability", "form_submissions", "survey_updates"):
+            with self.subTest(page=page_name):
+                response = self.client.get(reverse(page_name))
+                self.assertEqual(response.status_code, 302)
+                self.assertTrue(response.url.startswith(f"{reverse('login')}?next="))
+
+        response = self.client.post(
+            reverse(
+                "update_event_invitation_result",
+                args=[self.event.pk, self.invitation.pk],
+            ),
+            {"result": Invitation.Result.ATTENDING},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.invitation.refresh_from_db()
+        self.assertEqual(self.invitation.result, Invitation.Result.PENDING)
+
+    def test_non_staff_users_receive_forbidden_for_administrative_functions(self):
+        self.client.force_login(self.non_staff_user)
+
+        self.assertEqual(self.client.get(reverse("events")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("availability")).status_code, 403)
+        response = self.client.post(
+            reverse(
+                "update_event_invitation_plus_ones",
+                args=[self.event.pk, self.invitation.pk],
+            ),
+            {"delta": 1},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.invitation.refresh_from_db()
+        self.assertEqual(self.invitation.plus_ones, 0)
+
+    def test_staff_users_can_access_events_and_update_invitations(self):
+        self.client.force_login(self.staff_user)
+        events_response = self.client.get(reverse("events"))
+        self.assertEqual(events_response.status_code, 200)
+        self.assertContains(events_response, "Logout")
+
+        response = self.client.post(
+            reverse(
+                "update_event_invitation_result",
+                args=[self.event.pk, self.invitation.pk],
+            ),
+            {"result": Invitation.Result.ATTENDING},
+        )
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(
+            reverse(
+                "update_event_invitation_plus_ones",
+                args=[self.event.pk, self.invitation.pk],
+            ),
+            {"delta": 1},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.invitation.refresh_from_db()
+        self.assertEqual(self.invitation.result, Invitation.Result.ATTENDING)
+        self.assertEqual(self.invitation.plus_ones, 1)
+
+    def test_login_and_post_logout_use_sessions(self):
+        response = self.client.post(
+            reverse("login"),
+            {"username": self.staff_user.username, "password": "test-password"},
+        )
+        self.assertRedirects(response, reverse("events"))
+        self.assertTrue(self.client.get(reverse("events")).wsgi_request.user.is_authenticated)
+
+        response = self.client.post(reverse("logout"))
+        self.assertRedirects(response, reverse("login"))
+        self.assertEqual(self.client.get(reverse("events")).status_code, 302)

@@ -50,10 +50,48 @@
             background: #374151;
         }
 
+        .nav-form {
+            margin: 0;
+        }
+
+        .nav-button {
+            width: 100%;
+            border: 0;
+            background: none;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+
         .page-content {
             flex: 1;
             padding: 1rem;
             min-width: 0;
+        }
+
+        @media (max-width: 700px) {
+            .app-layout {
+                display: block;
+            }
+
+            .sidebar,
+            .sidebar:hover {
+                width: 100%;
+                padding: 0.5rem;
+                overflow: visible;
+            }
+
+            .nav-link,
+            .sidebar:hover .nav-link {
+                display: inline-block;
+                padding: 0.65rem 0.75rem;
+                opacity: 1;
+                pointer-events: auto;
+            }
+
+            .page-content {
+                padding: 0.75rem;
+            }
         }
 
         {% block extra_head %}{% endblock %}
@@ -62,13 +100,21 @@
 <body>
     <div class="app-layout">
         <nav class="sidebar">
-            <a class="nav-link" href="#">People</a>
-            <a class="nav-link" href="{% url 'events' %}">Events</a>
-            <a class="nav-link" href="#">Games</a>
-            <a class="nav-link" href="{% url 'availability' %}">Availability</a>
-            <a class="nav-link" href="#">Forms</a>
-            <a class="nav-link" href="{% url 'form_submissions' %}">Form Submissions</a>
-            <a class="nav-link" href="{% url 'survey_updates' %}">Survey Updates</a>
+            <a class="nav-link" href="{% url 'home' %}">Home</a>
+            {% if request.user.is_staff %}
+                <a class="nav-link" href="{% url 'events' %}">Events</a>
+                <a class="nav-link" href="{% url 'availability' %}">Availability</a>
+                <a class="nav-link" href="{% url 'form_submissions' %}">Form Submissions</a>
+                <a class="nav-link" href="{% url 'survey_updates' %}">Survey Updates</a>
+            {% endif %}
+            {% if request.user.is_authenticated %}
+                <form class="nav-form" method="post" action="{% url 'logout' %}">
+                    {% csrf_token %}
+                    <button class="nav-link nav-button" type="submit">Logout</button>
+                </form>
+            {% else %}
+                <a class="nav-link" href="{% url 'login' %}">Login</a>
+            {% endif %}
         </nav>
 
         <main class="page-content">
