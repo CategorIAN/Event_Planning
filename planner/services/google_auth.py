@@ -1,5 +1,7 @@
+
 """Shared OAuth credentials for Google Workspace integrations."""
 
+import os
 from pathlib import Path
 
 from django.conf import settings
@@ -12,7 +14,13 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 FORMS_READONLY_SCOPE = "https://www.googleapis.com/auth/forms.body.readonly"
 FORMS_RESPONSES_READONLY_SCOPE = "https://www.googleapis.com/auth/forms.responses.readonly"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
-SCOPES = [FORMS_READONLY_SCOPE, FORMS_RESPONSES_READONLY_SCOPE, GMAIL_SEND_SCOPE]
+
+SCOPES = [
+    FORMS_READONLY_SCOPE,
+    FORMS_RESPONSES_READONLY_SCOPE,
+    GMAIL_SEND_SCOPE,
+]
+
 AUTHORIZATION_COMMAND = "python manage.py authorize_google_integrations"
 
 
@@ -21,18 +29,19 @@ class GoogleAuthorizationError(Exception):
 
 
 def get_authorized_credentials() -> Credentials:
-    """Load and refresh the shared token without starting interactive OAuth."""
+    """Load and refresh the shared token without interactive OAuth."""
     token_path = _token_path()
+
     if not token_path.is_file():
         raise GoogleAuthorizationError(
             f"No authorized Google token was found. Run '{AUTHORIZATION_COMMAND}'."
         )
 
     try:
-        credentials = Credentials.from_authorized_user_file(token_path)
+        credentials = Credentials.from_authorized_user_file(str(token_path))
     except (OSError, ValueError) as error:
         raise GoogleAuthorizationError(
-            f"The authorized Google token could not be read. Run '{AUTHORIZATION_COMMAND}'."
+            "The authorized Google token could not be read."
         ) from error
 
     if not set(SCOPES).issubset(credentials.scopes or []):
@@ -44,7 +53,17 @@ def get_authorized_credentials() -> Credentials:
     try:
         if credentials.expired and credentials.refresh_token:
             credentials.refresh(Request())
-            token_path.write_text(credentials.to_json(), encoding="utf-8")
+
+            # Render Secret Files are read-only.
+            # Persist refreshed credentials only for local development.
+            if os.access(token_path, os.W_OK) and not str(token_path).startswith(
+                "/etc/secrets/"
+            ):
+                token_path.write_text(
+                    credentials.to_json(),
+                    encoding="utf-8",
+                )
+
     except (OSError, RefreshError, ValueError) as error:
         raise GoogleAuthorizationError(
             f"Google token refresh failed. Run '{AUTHORIZATION_COMMAND}' to re-authorize."
@@ -54,28 +73,46 @@ def get_authorized_credentials() -> Credentials:
         raise GoogleAuthorizationError(
             f"The Google token is no longer valid. Run '{AUTHORIZATION_COMMAND}'."
         )
+
     return credentials
 
 
 def authorize_google_integrations() -> None:
     """Run the installed-app flow and save one token with every integration scope."""
     credentials_path = _credentials_path()
+
     if not credentials_path.is_file():
         raise GoogleAuthorizationError(
             f"OAuth client credentials were not found at {credentials_path}."
         )
 
     try:
-        flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(credentials_path),
+            SCOPES,
+        )
         credentials = flow.run_local_server(port=0)
-        _token_path().write_text(credentials.to_json(), encoding="utf-8")
+        _token_path().write_text(
+            credentials.to_json(),
+            encoding="utf-8",
+        )
     except (OSError, ValueError) as error:
         raise GoogleAuthorizationError("Google OAuth authorization failed.") from error
 
 
 def _credentials_path() -> Path:
-    return Path(settings.BASE_DIR) / "credentials.json"
+    return Path(
+        os.environ.get(
+            "GOOGLE_CREDENTIALS_PATH",
+            str(Path(settings.BASE_DIR) / "credentials.json"),
+        )
+    )
 
 
 def _token_path() -> Path:
-    return Path(settings.BASE_DIR) / "token.json"
+    return Path(
+        os.environ.get(
+            "GOOGLE_TOKEN_PATH",
+            str(Path(settings.BASE_DIR) / "token.json"),
+        )
+    )
