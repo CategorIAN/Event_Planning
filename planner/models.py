@@ -483,6 +483,18 @@ class Event(models.Model):
         related_name="led_events",
     )
 
+    @property
+    def reviewed(self) -> bool | None:
+        """Return whether this Event's outcome and attendance have been reviewed."""
+        if hasattr(self, "reviewed_rank"):
+            return {0: False, 1: None, 2: True}[self.reviewed_rank]
+        if self.timestamp > timezone.now():
+            return None
+        has_attending_invitation = self.invitations.filter(
+            result=Invitation.Result.ATTENDING
+        ).exists()
+        return self.happened is not None and not has_attending_invitation
+
     def __str__(self):
         timestamp = self.timestamp.strftime(
             "%A, %B %d, %Y at %I:%M %p"

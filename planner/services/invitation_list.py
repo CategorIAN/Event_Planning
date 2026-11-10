@@ -18,7 +18,6 @@ ATTENDANCE_RESULTS = {Invitation.Result.ATTENDING, Invitation.Result.ATTENDED}
 @dataclass(frozen=True)
 class InvitationListRow:
     person: Person
-    invited: bool
     redeem: bool
     new: bool
     expected_attendance: datetime | None
@@ -59,6 +58,9 @@ def get_invitation_list(event: Event) -> list[InvitationListRow]:
             continue
 
         invitations = person.invitation_history
+        if any(invitation.event_id == event.pk for invitation in invitations):
+            continue
+
         latest_invite = _latest_invite(invitations)
         latest_attendance = _latest_attendance(invitations)
         latest_wait = _latest_wait(invitations)
@@ -81,7 +83,6 @@ def get_invitation_list(event: Event) -> list[InvitationListRow]:
         rows.append(
             InvitationListRow(
                 person=person,
-                invited=any(invitation.event_id == event.pk for invitation in invitations),
                 redeem=redeem,
                 new=is_new,
                 expected_attendance=expected_attendance,
@@ -128,7 +129,6 @@ def _expected_datetime(
 
 def _invitation_list_sort_key(row: InvitationListRow) -> tuple:
     return (
-        row.invited,
         not row.redeem,
         not row.new,
         row.expected_attendance is None,

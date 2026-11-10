@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from planner.models import Event, Invitation, Person
@@ -15,6 +15,21 @@ from planner.services.invitation_list import get_invitation_list
 VENUE_NAME = "The Parlour"
 VENUE_LOCATION = "Sidney, MT"
 VENUE_FACEBOOK_URL = "https://www.facebook.com/theparlour.mt/"
+PRE_GAME_RESULTS = frozenset(
+    {
+        Invitation.Result.PENDING,
+        Invitation.Result.WAITING,
+        Invitation.Result.ATTENDING,
+        Invitation.Result.DECLINED,
+    }
+)
+POST_GAME_RESULTS = frozenset(
+    {
+        Invitation.Result.ATTENDING,
+        Invitation.Result.ATTENDED,
+        Invitation.Result.FLAKED,
+    }
+)
 
 
 class EventInvitationError(Exception):
@@ -172,18 +187,41 @@ def get_current_attendance(event: Event) -> int:
     return attendance
 
 
+def record_event_happened(event: Event, happened: bool) -> Event:
+    """Record whether an Event occurred and restore attendees to Waiting if it did not."""
+    with transaction.atomic():
+        event = Event.objects.select_for_update().get(pk=event.pk)
+        changed_to_no = happened is False and event.happened is not False
+        event.happened = happened
+        event.save(update_fields=["happened"])
+        if changed_to_no:
+            Invitation.objects.filter(
+                event=event,
+                result=Invitation.Result.ATTENDING,
+            ).update(result=Invitation.Result.WAITING)
+    return event
+
+
 def update_invitation_result(
-    event: Event, invitation_id: int, result: str
+    event: Event,
+    invitation_id: int,
+    result: str,
+    *,
+    allowed_results: frozenset[str],
 ) -> Invitation:
-    """Update one invitation's valid result for the specified Event."""
-    if result not in Invitation.Result.values:
-        raise EventInvitationUpdateError("The requested invitation result is invalid.")
+    """Update an invitation only within its permitted workflow state set."""
+    if result not in allowed_results:
+        raise EventInvitationUpdateError("That result is not allowed in this workflow.")
     try:
         invitation = Invitation.objects.get(pk=invitation_id, event=event)
     except Invitation.DoesNotExist as error:
         raise EventInvitationUpdateError(
             "The invitation does not belong to this Event."
         ) from error
+    if invitation.result not in allowed_results:
+        raise EventInvitationUpdateError(
+            "This invitation cannot be updated from its current workflow state."
+        )
     invitation.result = result
     invitation.save(update_fields=["result"])
     return invitation

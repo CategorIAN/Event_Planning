@@ -86,6 +86,45 @@
             background: #f7f7f7;
         }
 
+        .current-event-title {
+            margin: 0 0 1.5rem;
+        }
+
+        .current-event-title button {
+            border: 0;
+            background: none;
+            padding: 0;
+            color: #111;
+            font: inherit;
+            font-size: clamp(1.5rem, 5vw, 2.25rem);
+            font-weight: 700;
+            text-align: left;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .event-happened-status {
+            display: inline-block;
+            margin-left: 0.4rem;
+            font-size: clamp(1.5rem, 5vw, 2.25rem);
+            line-height: 1;
+            vertical-align: middle;
+        }
+
+        .event-happened-status.yes {
+            color: #198754;
+        }
+
+        .event-happened-status.no {
+            color: #b42318;
+        }
+
+        .event-review-status {
+            margin: -1rem 0 1.5rem;
+            color: #444;
+            font-weight: 600;
+        }
+
         .event-details dt {
             font-weight: 700;
         }
@@ -110,7 +149,8 @@
             background: #e3e3e3;
         }
 
-        .active-invitations {
+        .active-invitations,
+        .post-game-attendance {
             margin-top: 2rem;
         }
 
@@ -187,6 +227,77 @@
             font: inherit;
         }
 
+        .post-game-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .post-game-table th,
+        .post-game-table td {
+            padding: 0.7rem;
+            border: 1px solid #b9b9b9;
+            text-align: left;
+        }
+
+        .post-game-table th {
+            background: #e3e3e3;
+        }
+
+        .post-game-table tr.awaiting-result td {
+            background: #fce2e2;
+        }
+
+        .section-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .section-heading h2 {
+            margin: 0;
+        }
+
+        .section-toggle {
+            min-height: 2.5rem;
+            padding: 0.45rem 0.7rem;
+            border: 1px solid #7d7d7d;
+            background: #f2f2f2;
+            color: #222;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .happened-button {
+            border: 0;
+            background: none;
+            color: #1d3f75;
+            font: inherit;
+            font-weight: 600;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .happened-actions {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .attendance-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+
+        .attendance-actions button {
+            min-height: 2.5rem;
+            padding: 0.45rem 0.65rem;
+            border: 1px solid #7d7d7d;
+            background: #f2f2f2;
+            color: #222;
+            cursor: pointer;
+        }
+
         .invitation-result-form button {
             border: 1px solid #7d7d7d;
             background: #f2f2f2;
@@ -218,6 +329,11 @@
             .invitation-column {
                 min-height: 0;
             }
+
+            .post-game-table {
+                display: block;
+                overflow-x: auto;
+            }
         }
 {% endblock %}
 
@@ -237,63 +353,73 @@
                 Event
                 <select name="event_id" onchange="this.form.submit()">
                     {% for event in events %}
-                        <option value="{{ event.pk }}" {% if event.pk == selected_event.pk %}selected{% endif %}>{{ event }}</option>
+                        <option value="{{ event.pk }}" {% if event.pk == selected_event.pk %}selected{% endif %}>[{{ event.review_status_label }}] {{ event }}</option>
                     {% endfor %}
                 </select>
             </label>
             <noscript><button type="submit">Select</button></noscript>
         </form>
 
-        <dl class="event-details">
-            <div><dt>Game</dt><dd>{{ selected_event.game }}</dd></div>
-            <div><dt>Event date/time</dt><dd>{{ selected_event.timestamp|date:"M j, Y, g:i A T" }}</dd></div>
-            <div><dt>TimeSpan</dt><dd>{{ selected_event.time_span }}</dd></div>
-            <div><dt>Leader</dt><dd>{{ selected_event.leader }}</dd></div>
-            <div><dt>Game min players</dt><dd>{{ selected_event.game.min_players|default:"Not set" }}</dd></div>
-            <div><dt>Game max players</dt><dd>{{ selected_event.game.max_players|default:"Not set" }}</dd></div>
-        </dl>
+        <h2 class="current-event-title">
+            <button id="open-event-details-modal" type="button" aria-haspopup="dialog">{{ selected_event }}</button>
+            {% if selected_event.happened %}
+                <span class="event-happened-status yes" role="img" aria-label="Event happened">&#10003;</span>
+            {% elif selected_event.happened is not None %}
+                <span class="event-happened-status no" role="img" aria-label="Event did not happen">&#10007;</span>
+            {% endif %}
+        </h2>
+        <p class="event-review-status">{{ selected_event.review_status_label }}</p>
 
-        <h2>Invitation List</h2>
-        <table class="invitation-list">
-            <thead>
-                <tr>
-                    <th>Person</th>
-                    <th>Invited</th>
-                    <th>Redeem</th>
-                    <th>New</th>
-                    <th>Expected Attendance</th>
-                    <th>Expected Invite</th>
-                    <th>Invite</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in invitation_rows %}
-                    <tr>
-                        <td>{{ row.person.name }}</td>
-                        <td>{% if row.invited %}Yes{% else %}No{% endif %}</td>
-                        <td>{% if row.redeem %}Yes{% else %}No{% endif %}</td>
-                        <td>{% if row.new %}Yes{% else %}No{% endif %}</td>
-                        <td>{% if row.expected_attendance %}{{ row.expected_attendance|date:"M j, Y, g:i A T" }}{% else %}Never{% endif %}</td>
-                        <td>{% if row.expected_invite %}{{ row.expected_invite|date:"M j, Y, g:i A T" }}{% else %}Never{% endif %}</td>
-                        <td>
-                            <form method="post" action="{% url 'send_event_invitation_from_events' selected_event.pk row.person.pk %}">
-                                {% csrf_token %}
-                                <button class="action-button" type="submit">Invite</button>
-                            </form>
-                        </td>
-                    </tr>
-                {% empty %}
-                    <tr><td colspan="7">No eligible people are currently due for this invitation list.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <section class="invitation-list-section">
+            <div class="section-heading">
+                <h2>Invitation List</h2>
+                <button class="section-toggle" type="button" data-target="invitation-list-content" aria-expanded="false">Show</button>
+            </div>
+            <div id="invitation-list-content" hidden>
+                <table class="invitation-list">
+                    <thead>
+                        <tr>
+                            <th>Person</th>
+                            <th>Redeem</th>
+                            <th>New</th>
+                            <th>Expected Attendance</th>
+                            <th>Expected Invite</th>
+                            <th>Invite</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in invitation_rows %}
+                            <tr>
+                                <td>{{ row.person.name }}</td>
+                                <td>{% if row.redeem %}Yes{% else %}No{% endif %}</td>
+                                <td>{% if row.new %}Yes{% else %}No{% endif %}</td>
+                                <td>{% if row.expected_attendance %}{{ row.expected_attendance|date:"M j, Y, g:i A T" }}{% else %}Never{% endif %}</td>
+                                <td>{% if row.expected_invite %}{{ row.expected_invite|date:"M j, Y, g:i A T" }}{% else %}Never{% endif %}</td>
+                                <td>
+                                    <form method="post" action="{% url 'send_event_invitation_from_events' selected_event.pk row.person.pk %}">
+                                        {% csrf_token %}
+                                        <button class="action-button" type="submit">Invite</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="6">No eligible people are currently due for this invitation list.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
 
         <section class="active-invitations">
-            <h2>Active Invitations</h2>
-            <p id="current-attendance">Current attendance: {{ current_attendance }}</p>
-            <p class="board-message" id="invitation-board-message" aria-live="polite"></p>
-            <form id="invitation-board-csrf" hidden>{% csrf_token %}</form>
-            <div class="invitation-board" id="invitation-board">
+            <div class="section-heading">
+                <h2>Pre-Game Invitations</h2>
+                <button class="section-toggle" type="button" data-target="pre-game-invitations-content" aria-expanded="false">Show</button>
+            </div>
+            <div id="pre-game-invitations-content" hidden>
+                <p id="current-attendance">Current attendance: {{ current_attendance }}</p>
+                <p class="board-message" id="invitation-board-message" aria-live="polite"></p>
+                <form id="invitation-board-csrf" hidden>{% csrf_token %}</form>
+                <div class="invitation-board" id="invitation-board">
                 {% for column in invitation_columns %}
                     <section class="invitation-column" data-result="{{ column.value }}">
                         <h3>{{ column.label }}</h3>
@@ -322,11 +448,12 @@
                                         <label>
                                             Result
                                             <select name="result">
-                                                {% for value, label in invitation_result_choices %}
+                                                {% for value, label in pre_game_result_choices %}
                                                     <option value="{{ value }}" {% if value == invitation.result %}selected{% endif %}>{{ label }}</option>
                                                 {% endfor %}
                                             </select>
                                         </label>
+                                        <input type="hidden" name="workflow" value="pre_game">
                                         <input type="hidden" name="next" value="events">
                                         <button type="submit">Update result</button>
                                     </form>
@@ -337,6 +464,48 @@
                         </div>
                     </section>
                 {% endfor %}
+                </div>
+            </div>
+        </section>
+
+        <section class="post-game-attendance">
+            <div class="section-heading">
+                <h2>Post-Game Results</h2>
+                <div>
+                    <button class="happened-button" id="open-happened-modal" type="button">Happened?</button>
+                    <button class="section-toggle" type="button" data-target="post-game-results-content" aria-expanded="false">Show</button>
+                </div>
+            </div>
+            <div id="post-game-results-content" hidden>
+                <table class="post-game-table">
+                <thead>
+                    <tr>
+                        <th>Person</th>
+                        <th>Current result</th>
+                        <th>Record attendance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for invitation in post_game_invitations %}
+                        <tr{% if invitation.result == "attending" %} class="awaiting-result"{% endif %}>
+                            <td>{{ invitation.person.name }}</td>
+                            <td>{{ invitation.get_result_display }}</td>
+                            <td>
+                                <form class="attendance-actions" method="post" action="{% url 'update_event_invitation_result' selected_event.pk invitation.pk %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="workflow" value="post_game">
+                                    <input type="hidden" name="next" value="events">
+                                    <button type="submit" name="result" value="attending" {% if invitation.result == "attending" %}disabled{% endif %}>Attending</button>
+                                    <button type="submit" name="result" value="attended" {% if invitation.result == "attended" %}disabled{% endif %}>Attended</button>
+                                    <button type="submit" name="result" value="flaked" {% if invitation.result == "flaked" %}disabled{% endif %}>Flaked</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="3">No attendance records are ready to record.</td></tr>
+                    {% endfor %}
+                </tbody>
+                </table>
             </div>
         </section>
     {% else %}
@@ -361,6 +530,36 @@
             </form>
         </section>
     </div>
+
+    {% if selected_event %}
+        <div class="event-modal" id="event-details-modal" role="dialog" aria-modal="true" aria-labelledby="event-details-modal-title" hidden>
+            <section class="event-modal-content">
+                <button class="event-modal-close" id="close-event-details-modal" type="button" aria-label="Close Event details">&times;</button>
+                <h2 id="event-details-modal-title">Event Details</h2>
+                <dl class="event-details">
+                    <div><dt>Game</dt><dd>{{ selected_event.game }}</dd></div>
+                    <div><dt>Event date/time</dt><dd>{{ selected_event.timestamp|date:"M j, Y, g:i A T" }}</dd></div>
+                    <div><dt>TimeSpan</dt><dd>{{ selected_event.time_span }}</dd></div>
+                    <div><dt>Leader</dt><dd>{{ selected_event.leader }}</dd></div>
+                    <div><dt>Game min players</dt><dd>{{ selected_event.game.min_players|default:"Not set" }}</dd></div>
+                    <div><dt>Game max players</dt><dd>{{ selected_event.game.max_players|default:"Not set" }}</dd></div>
+                </dl>
+            </section>
+        </div>
+
+        <div class="event-modal" id="happened-modal" role="dialog" aria-modal="true" aria-labelledby="happened-modal-title" hidden>
+            <section class="event-modal-content">
+                <button class="event-modal-close" id="close-happened-modal" type="button" aria-label="Close Event outcome form">&times;</button>
+                <h2 id="happened-modal-title">Did this Event happen?</h2>
+                <p>If you select No, every current Attending invitation for this Event will move back to Waiting.</p>
+                <form class="happened-actions" method="post" action="{% url 'update_event_happened' selected_event.pk %}">
+                    {% csrf_token %}
+                    <button class="action-button" type="submit" name="happened" value="yes">Yes</button>
+                    <button class="action-button" type="submit" name="happened" value="no">No</button>
+                </form>
+            </section>
+        </div>
+    {% endif %}
 {% endblock %}
 
 {% block extra_script %}
@@ -383,7 +582,56 @@
             }
         });
 
+        document.querySelectorAll(".section-toggle").forEach(button => {
+            button.addEventListener("click", () => {
+                const content = document.getElementById(button.dataset.target);
+                if (!content) {
+                    return;
+                }
+                const isHidden = content.hidden;
+                content.hidden = !isHidden;
+                button.textContent = isHidden ? "Hide" : "Show";
+                button.setAttribute("aria-expanded", String(isHidden));
+            });
+        });
+
         {% if selected_event %}
+        const eventDetailsModal = document.getElementById("event-details-modal");
+        const closeEventDetailsModal = () => { eventDetailsModal.hidden = true; };
+
+        document.getElementById("open-event-details-modal").addEventListener("click", () => {
+            eventDetailsModal.hidden = false;
+        });
+        document.getElementById("close-event-details-modal").addEventListener("click", closeEventDetailsModal);
+        eventDetailsModal.addEventListener("click", event => {
+            if (event.target === eventDetailsModal) {
+                closeEventDetailsModal();
+            }
+        });
+        document.addEventListener("keydown", event => {
+            if (event.key === "Escape" && !eventDetailsModal.hidden) {
+                closeEventDetailsModal();
+            }
+        });
+
+        const happenedModal = document.getElementById("happened-modal");
+        const closeHappenedModal = () => { happenedModal.hidden = true; };
+
+        document.getElementById("open-happened-modal").addEventListener("click", () => {
+            happenedModal.hidden = false;
+        });
+        document.getElementById("close-happened-modal").addEventListener("click", closeHappenedModal);
+        happenedModal.addEventListener("click", event => {
+            if (event.target === happenedModal) {
+                closeHappenedModal();
+            }
+        });
+        document.addEventListener("keydown", event => {
+            if (event.key === "Escape" && !happenedModal.hidden) {
+                closeHappenedModal();
+            }
+        });
+
         const board = document.getElementById("invitation-board");
         const boardMessage = document.getElementById("invitation-board-message");
         const attendanceDisplay = document.getElementById("current-attendance");
@@ -445,6 +693,7 @@
                 try {
                     const data = await postBoardUpdate(draggedCard.dataset.resultUrl, {
                         result: column.dataset.result,
+                        workflow: "pre_game",
                     });
                     const previousCards = draggedCard.closest(".invitation-cards");
                     const targetCards = column.querySelector(".invitation-cards");

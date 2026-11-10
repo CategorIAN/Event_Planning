@@ -8,6 +8,7 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.db import DatabaseError
+from django.utils import timezone
 
 from planner.forms import EventForm
 from planner.models import (
@@ -669,17 +670,17 @@ class InvitationListServiceTests(TestCase):
 
         self.assertEqual(
             [row.person.name for row in rows],
-            ["New Person", "Attending Person", "Recent Invite", "Redeem Person"],
+            ["New Person", "Attending Person", "Recent Invite"],
         )
         self.assertNotIn("Unavailable Person", rows_by_name)
         self.assertNotIn("Not Due Yet", rows_by_name)
         self.assertNotIn("Not Now Person", rows_by_name)
         self.assertNotIn("Owner", rows_by_name)
         self.assertNotIn("Leader", rows_by_name)
+        self.assertNotIn("Redeem Person", rows_by_name)
 
         new_row = rows_by_name["New Person"]
         self.assertTrue(new_row.new)
-        self.assertFalse(new_row.invited)
 
         self.assertFalse(rows_by_name["Recent Invite"].new)
 
@@ -688,11 +689,6 @@ class InvitationListServiceTests(TestCase):
             attending_row.expected_attendance,
             self.now - timedelta(days=23),
         )
-
-        redeem_row = rows_by_name["Redeem Person"]
-        self.assertTrue(redeem_row.redeem)
-        self.assertTrue(redeem_row.invited)
-        self.assertEqual(redeem_row.expected_invite, self.now + timedelta(days=6))
 
     def test_events_page_displays_selected_event_and_invitation_list(self):
         response = self.client.get(reverse("events"), {"event_id": self.event.pk})
@@ -756,11 +752,19 @@ class InvitationListServiceTests(TestCase):
             plus_ones=plus_ones,
         )
 
-    def test_active_invitations_board_has_all_results_and_only_selected_event(self):
+    def test_pre_game_board_and_post_game_table_show_the_correct_records(self):
         board_invitations = {
             value: self._create_board_invitation(label, value)
             for value, label in Invitation.Result.choices
+            if value in {
+                Invitation.Result.PENDING,
+                Invitation.Result.WAITING,
+                Invitation.Result.ATTENDING,
+                Invitation.Result.DECLINED,
+            }
         }
+        attended = self._create_board_invitation("Attended", Invitation.Result.ATTENDED)
+        flaked = self._create_board_invitation("Flaked", Invitation.Result.FLAKED)
         other_event = Event.objects.create(
             game=self.game,
             time_span=self.time_span,
@@ -780,8 +784,18 @@ class InvitationListServiceTests(TestCase):
         response = self.client.get(reverse("events"), {"event_id": self.event.pk})
         columns = {column["value"]: column for column in response.context["invitation_columns"]}
 
-        self.assertEqual(set(columns), set(Invitation.Result.values))
+        self.assertEqual(
+            set(columns),
+            {
+                Invitation.Result.PENDING,
+                Invitation.Result.WAITING,
+                Invitation.Result.ATTENDING,
+                Invitation.Result.DECLINED,
+            },
+        )
         for value, label in Invitation.Result.choices:
+            if value not in columns:
+                continue
             self.assertContains(response, label)
             invitation = board_invitations[value]
             self.assertIn(invitation, columns[value]["invitations"])
@@ -791,6 +805,14 @@ class InvitationListServiceTests(TestCase):
                 invitation
                 for column in columns.values()
                 for invitation in column["invitations"]
+            ],
+        )
+        self.assertEqual(
+            response.context["post_game_invitations"],
+            [
+                board_invitations[Invitation.Result.ATTENDING],
+                attended,
+                flaked,
             ],
         )
 
@@ -842,6 +864,80 @@ class InvitationListServiceTests(TestCase):
         other_invitation.refresh_from_db()
         self.assertEqual(other_invitation.result, Invitation.Result.PENDING)
 
+    def test_post_game_attendance_updates_and_rejects_cross_workflow_transitions(self):
+        invitation = self._create_board_invitation(
+            "Attendance Person", Invitation.Result.ATTENDING
+        )
+        update_url = reverse(
+            "update_event_invitation_result",
+            args=[self.event.pk, invitation.pk],
+        )
+
+        response = self.client.post(
+            update_url,
+            {"workflow": "post_game", "result": Invitation.Result.ATTENDED},
+        )
+        self.assertEqual(response.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.result, Invitation.Result.ATTENDED)
+
+        response = self.client.post(
+            update_url,
+            {"workflow": "post_game", "result": Invitation.Result.FLAKED},
+        )
+        self.assertEqual(response.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.result, Invitation.Result.FLAKED)
+
+        response = self.client.post(
+            update_url,
+            {"workflow": "pre_game", "result": Invitation.Result.PENDING},
+        )
+        self.assertEqual(response.status_code, 400)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.result, Invitation.Result.FLAKED)
+
+        pending = self._create_board_invitation("Pending Person", Invitation.Result.PENDING)
+        response = self.client.post(
+            reverse(
+                "update_event_invitation_result",
+                args=[self.event.pk, pending.pk],
+            ),
+            {"workflow": "post_game", "result": Invitation.Result.ATTENDED},
+        )
+        self.assertEqual(response.status_code, 400)
+        pending.refresh_from_db()
+        self.assertEqual(pending.result, Invitation.Result.PENDING)
+
+    def test_recording_that_an_event_did_not_happen_returns_attendees_to_waiting(self):
+        attending = self._create_board_invitation(
+            "Attending Person", Invitation.Result.ATTENDING
+        )
+        attended = self._create_board_invitation(
+            "Attended Person", Invitation.Result.ATTENDED
+        )
+
+        response = self.client.post(
+            reverse("update_event_happened", args=[self.event.pk]),
+            {"happened": "no"},
+        )
+
+        self.assertRedirects(response, f"/events/?event_id={self.event.pk}")
+        self.event.refresh_from_db()
+        attending.refresh_from_db()
+        attended.refresh_from_db()
+        self.assertIs(self.event.happened, False)
+        self.assertEqual(attending.result, Invitation.Result.WAITING)
+        self.assertEqual(attended.result, Invitation.Result.ATTENDED)
+
+        response = self.client.post(
+            reverse("update_event_happened", args=[self.event.pk]),
+            {"happened": "yes"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.event.refresh_from_db()
+        self.assertIs(self.event.happened, True)
+
     def test_plus_one_updates_persist_and_cannot_go_below_zero(self):
         invitation = self._create_board_invitation("Plus One Person", Invitation.Result.PENDING)
         update_url = reverse(
@@ -863,6 +959,99 @@ class InvitationListServiceTests(TestCase):
         self.assertEqual(response.status_code, 400)
         invitation.refresh_from_db()
         self.assertEqual(invitation.plus_ones, 0)
+
+
+class EventReviewTests(TestCase):
+    def setUp(self):
+        self.staff_user = get_user_model().objects.create_user(
+            username="review-staff",
+            password="test-password",
+            is_staff=True,
+        )
+        self.client.force_login(self.staff_user)
+        self.day = Day.objects.create(name="Saturday", order=6)
+        self.start_hour = Hour.objects.create(time=time(16, 0))
+        self.end_hour = Hour.objects.create(time=time(17, 0))
+        day_hour = DayHour.objects.create(day=self.day, hour=self.start_hour)
+        self.time_span = TimeSpan.objects.create(
+            day=self.day,
+            start_hour=self.start_hour,
+            end_hour=self.end_hour,
+        )
+        self.time_span.day_hours.add(day_hour)
+        self.game_type = GameType.objects.create(name="Review Game Type")
+        self.leader = Person.objects.create(
+            name="Review Leader", email="review-leader@example.com"
+        )
+
+    def _event(self, name, timestamp, *, happened=None):
+        return Event.objects.create(
+            game=Game.objects.create(name=name, game_type=self.game_type),
+            time_span=self.time_span,
+            timestamp=timestamp,
+            happened=happened,
+            leader=self.leader,
+        )
+
+    def test_reviewed_property_has_all_three_states(self):
+        now = timezone.now()
+        upcoming = self._event("Upcoming", now + timedelta(days=1))
+        unrecorded = self._event("Unrecorded", now - timedelta(days=1))
+        complete = self._event("Complete", now - timedelta(days=2), happened=True)
+        attending = self._event("Attending", now - timedelta(days=3), happened=True)
+        Invitation.objects.create(
+            event=attending,
+            person=Person.objects.create(name="Attending", email="attending@example.com"),
+            invited_at=now - timedelta(days=4),
+            result=Invitation.Result.ATTENDING,
+        )
+
+        self.assertIsNone(upcoming.reviewed)
+        self.assertFalse(unrecorded.reviewed)
+        self.assertTrue(complete.reviewed)
+        self.assertFalse(attending.reviewed)
+
+    def test_events_are_prioritized_and_labeled_by_review_status(self):
+        now = timezone.now()
+        needs_newer = self._event("Needs Newer", now - timedelta(days=1))
+        needs_older = self._event("Needs Older", now - timedelta(days=2))
+        upcoming_newer = self._event("Upcoming Newer", now + timedelta(days=3))
+        upcoming_older = self._event("Upcoming Older", now + timedelta(days=1))
+        reviewed_newer = self._event(
+            "Reviewed Newer", now - timedelta(days=3), happened=True
+        )
+        reviewed_older = self._event(
+            "Reviewed Older", now - timedelta(days=4), happened=False
+        )
+
+        response = self.client.get(reverse("events"))
+        events = response.context["events"]
+
+        self.assertEqual(
+            [event.pk for event in events],
+            [
+                needs_newer.pk,
+                needs_older.pk,
+                upcoming_newer.pk,
+                upcoming_older.pk,
+                reviewed_newer.pk,
+                reviewed_older.pk,
+            ],
+        )
+        self.assertEqual(response.context["selected_event"], needs_newer)
+        self.assertContains(response, "[Needs Review]")
+        self.assertContains(response, "[Upcoming]")
+        self.assertContains(response, "[Reviewed]")
+        self.assertContains(response, "Needs Review")
+
+        response = self.client.get(
+            reverse("events"), {"event_id": reviewed_older.pk}
+        )
+        self.assertEqual(response.context["selected_event"], reviewed_older)
+        self.assertEqual(
+            response.context["selected_event"].review_status_label,
+            "Reviewed",
+        )
 
 
 class EventInvitationServiceTests(TestCase):

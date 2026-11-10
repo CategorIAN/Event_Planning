@@ -8,9 +8,9 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.db import transaction
-from django.db.models import Max, Prefetch, Q
+from django.db.models import Case, Exists, IntegerField, Max, OuterRef, Prefetch, Q, Value, When
 from django.core.exceptions import PermissionDenied
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -29,8 +29,11 @@ from planner.services.google_forms import GoogleFormsError
 from planner.services.event_invitations import (
     EventInvitationError,
     EventInvitationUpdateError,
+    POST_GAME_RESULTS,
+    PRE_GAME_RESULTS,
     adjust_invitation_plus_ones,
     get_current_attendance,
+    record_event_happened,
     send_event_invitation,
     update_invitation_result as update_invitation_result_service,
 )
@@ -234,15 +237,48 @@ def send_event_invitation_from_events(
 
 @staff_required
 @require_POST
+def update_event_happened(request: HttpRequest, event_id: int) -> HttpResponse:
+    event = get_object_or_404(Event, pk=event_id)
+    happened_values = {"yes": True, "no": False}
+    happened = happened_values.get(request.POST.get("happened"))
+    if happened is None:
+        messages.error(request, "Choose Yes or No for whether the Event happened.")
+        return redirect(_events_url(event))
+
+    record_event_happened(event, happened)
+    if happened:
+        messages.success(request, "Recorded that the Event happened.")
+    else:
+        messages.success(
+            request,
+            "Recorded that the Event did not happen; Attending invitations were moved to Waiting.",
+        )
+    return redirect(_events_url(event))
+
+
+@staff_required
+@require_POST
 def update_event_invitation_result(
     request: HttpRequest, event_id: int, invitation_id: int
 ) -> HttpResponse:
     event = get_object_or_404(Event, pk=event_id)
+    workflow = request.POST.get("workflow", "pre_game")
+    allowed_results = {
+        "pre_game": PRE_GAME_RESULTS,
+        "post_game": POST_GAME_RESULTS,
+    }.get(workflow)
+    if allowed_results is None:
+        error = "The requested invitation workflow is invalid."
+        if request.POST.get("next"):
+            messages.error(request, error)
+            return redirect(_events_url(event))
+        return JsonResponse({"error": error}, status=400)
     try:
         invitation = update_invitation_result_service(
             event,
             invitation_id,
             request.POST.get("result", ""),
+            allowed_results=allowed_results,
         )
     except EventInvitationUpdateError as error:
         if request.POST.get("next"):
@@ -298,30 +334,50 @@ def _render_events_page(
     *,
     status: int = 200,
 ) -> HttpResponse:
+    now = timezone.now()
+    attending_invitations = Invitation.objects.filter(
+        event=OuterRef("pk"),
+        result=Invitation.Result.ATTENDING,
+    )
     event_choices = list(
-        Event.objects.select_related(
+        Event.objects.annotate(
+            has_attending_invitations=Exists(attending_invitations),
+        ).annotate(
+            reviewed_rank=Case(
+                When(timestamp__gt=now, then=Value(1)),
+                When(
+                    Q(happened__isnull=True) | Q(has_attending_invitations=True),
+                    then=Value(0),
+                ),
+                default=Value(2),
+                output_field=IntegerField(),
+            )
+        ).select_related(
             "game",
             "leader",
             "time_span__day",
             "time_span__start_hour",
             "time_span__end_hour",
         )
-        .order_by("-timestamp")
+        .order_by("reviewed_rank", "-timestamp")
     )
+    for event in event_choices:
+        event.review_status_label = _review_status_label(event.reviewed)
+
     selected_event = None
     if event_choices:
         selected_event_id = request.GET.get("event_id")
         if selected_event_id:
-            selected_event = get_object_or_404(
-                Event.objects.select_related(
-                    "game",
-                    "leader",
-                    "time_span__day",
-                    "time_span__start_hour",
-                    "time_span__end_hour",
-                ),
-                pk=selected_event_id,
+            try:
+                selected_event_id = int(selected_event_id)
+            except (TypeError, ValueError) as error:
+                raise Http404("Event does not exist.") from error
+            selected_event = next(
+                (event for event in event_choices if event.pk == selected_event_id),
+                None,
             )
+            if selected_event is None:
+                raise Http404("Event does not exist.")
         else:
             selected_event = event_choices[0]
 
@@ -336,7 +392,8 @@ def _render_events_page(
                 get_invitation_list(selected_event) if selected_event is not None else []
             ),
             "invitation_columns": _event_invitation_columns(selected_event),
-            "invitation_result_choices": Invitation.Result.choices,
+            "pre_game_result_choices": _result_choices(PRE_GAME_RESULTS),
+            "post_game_invitations": _post_game_invitations(selected_event),
             "current_attendance": (
                 get_current_attendance(selected_event)
                 if selected_event is not None
@@ -347,21 +404,48 @@ def _render_events_page(
     )
 
 
+def _review_status_label(reviewed: bool | None) -> str:
+    return {
+        False: "Needs Review",
+        None: "Upcoming",
+        True: "Reviewed",
+    }[reviewed]
+
+
 def _event_invitation_columns(event: Event | None) -> list[dict[str, object]]:
     columns = [
         {"value": value, "label": label, "invitations": []}
         for value, label in Invitation.Result.choices
+        if value in PRE_GAME_RESULTS
     ]
     if event is None:
         return columns
     invitations_by_result = {column["value"]: column["invitations"] for column in columns}
     for invitation in (
-        Invitation.objects.filter(event=event)
+        Invitation.objects.filter(event=event, result__in=PRE_GAME_RESULTS)
         .select_related("person")
         .order_by("invited_at")
     ):
         invitations_by_result[invitation.result].append(invitation)
     return columns
+
+
+def _post_game_invitations(event: Event | None) -> list[Invitation]:
+    if event is None:
+        return []
+    return list(
+        Invitation.objects.filter(event=event, result__in=POST_GAME_RESULTS)
+        .select_related("person")
+        .order_by("invited_at")
+    )
+
+
+def _result_choices(allowed_results: frozenset[str]) -> list[tuple[str, str]]:
+    return [
+        (value, label)
+        for value, label in Invitation.Result.choices
+        if value in allowed_results
+    ]
 
 
 def _events_url(event: Event) -> str:
