@@ -6,7 +6,24 @@ from django.conf import settings
 
 
 def save_json(data: Any, form_id: str, suffix: str = "") -> Path:
-    """Save JSON inspection output under the project's ignored raw_data folder."""
+    """Write formatted JSON to the project's raw_data directory.
+
+    Creates the directory if needed and overwrites the destination if it
+    already exists.
+
+    Args:
+        data: Value that can be serialized by json.dumps.
+        form_id: Google Form ID used in the filename. Characters other
+            than letters, digits, hyphens, and underscores become underscores.
+        suffix: Optional text appended before ".json". Use filename-safe text.
+
+    Returns:
+        The path to the written JSON file.
+
+    Raises:
+        TypeError: If data contains an unsupported JSON value.
+        OSError: If the directory cannot be created or the file cannot be written.
+    """
     safe_form_id = "".join(
         character if character.isalnum() or character in "-_" else "_"
         for character in form_id

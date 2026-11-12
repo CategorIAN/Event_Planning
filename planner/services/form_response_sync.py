@@ -72,6 +72,14 @@ def synchronize_google_form_responses() -> dict[str, int]:
 def _store_submission(
     form: Form, response: dict[str, Any]
 ) -> tuple[FormSubmission, bool]:
+    """Find or create one submission revision from a raw Google response.
+
+    Returns:
+        The stored submission and whether this response revision was new.
+
+    Raises:
+        FormResponseSynchronizationError: If required response identifiers or values are invalid.
+    """
     response_id = response.get("responseId")
     if not isinstance(response_id, str) or not response_id:
         raise FormResponseSynchronizationError("Google response is missing responseId.")
@@ -133,6 +141,11 @@ def apply_form_submission_to_person(
 
 
 def _apply_submission_if_exact_person_match(submission: FormSubmission) -> bool:
+    """Apply a submission only when exactly one Person matches its name and email.
+
+    Returns:
+        True when a unique Person was matched and updated; otherwise False.
+    """
     person = _find_exact_person(submission)
     if person is None:
         return False
@@ -141,6 +154,7 @@ def _apply_submission_if_exact_person_match(submission: FormSubmission) -> bool:
 
 
 def _find_exact_person(submission: FormSubmission) -> Person | None:
+    """Return the unique Person matching the stored normalized name and email."""
     people = list(
         Person.objects.filter(
             email=submission.submitted_email,
@@ -153,6 +167,11 @@ def _find_exact_person(submission: FormSubmission) -> Person | None:
 
 
 def _form_question(form: Form, name: str) -> FormQuestion:
+    """Return one configured FormQuestion by its application mapping name.
+
+    Raises:
+        FormResponseSynchronizationError: If the mapping is absent or ambiguous.
+    """
     try:
         return FormQuestion.objects.get(form=form, name=name)
     except FormQuestion.DoesNotExist as error:
@@ -168,6 +187,11 @@ def _form_question(form: Form, name: str) -> FormQuestion:
 def _mapped_choice_value(
     submission: FormSubmission, question: FormQuestion
 ) -> FormQuestionChoice:
+    """Return the configured choice for a submitted single-answer value.
+
+    Raises:
+        FormResponseSynchronizationError: If no corresponding choice mapping exists.
+    """
     submitted_value = _single_answer_value(
         submission.raw_response_data, question.google_question_id, question.name
     )
@@ -182,6 +206,11 @@ def _mapped_choice_value(
 
 
 def _mapped_duration(submission: FormSubmission, question: FormQuestion) -> timedelta:
+    """Return the Duration mapping for a submitted choice as a timedelta.
+
+    Raises:
+        FormResponseSynchronizationError: If the choice has no Duration mapping.
+    """
     choice = _mapped_choice_value(submission, question)
     if choice.duration is None:
         raise FormResponseSynchronizationError(
@@ -191,6 +220,11 @@ def _mapped_duration(submission: FormSubmission, question: FormQuestion) -> time
 
 
 def _integer_answer(submission: FormSubmission, question: FormQuestion) -> int:
+    """Parse a required single-answer response as an integer.
+
+    Raises:
+        FormResponseSynchronizationError: If the submitted value is not an integer.
+    """
     value = _single_answer_value(
         submission.raw_response_data, question.google_question_id, question.name
     )
@@ -205,6 +239,11 @@ def _integer_answer(submission: FormSubmission, question: FormQuestion) -> int:
 def _set_mapped_many_to_many(
     person: Person, submission: FormSubmission, question_name: str, mapping_field: str
 ) -> None:
+    """Replace one Person relation using configured selected-choice mappings.
+
+    Raises:
+        FormResponseSynchronizationError: If an answer lacks its required mapping.
+    """
     question = _form_question(submission.form, question_name)
     selected_values = _answer_values(
         submission.raw_response_data, question.google_question_id
@@ -228,6 +267,11 @@ def _set_mapped_many_to_many(
 
 
 def _set_availability(person: Person, submission: FormSubmission) -> None:
+    """Replace Person availability from configured availability-grid mappings.
+
+    Raises:
+        FormResponseSynchronizationError: If configured groups, DayHours, or mappings are missing.
+    """
     try:
         group = FormQuestionGroup.objects.get(form=submission.form, name="availability")
     except FormQuestionGroup.DoesNotExist as error:
@@ -269,6 +313,11 @@ def _set_availability(person: Person, submission: FormSubmission) -> None:
 
 
 def _response_submitted_at(response: dict[str, Any]) -> datetime:
+    """Return a Google response's required submission time in UTC.
+
+    Raises:
+        FormResponseSynchronizationError: If the timestamp is absent, invalid, or naive.
+    """
     timestamp = response.get("lastSubmittedTime")
     if not isinstance(timestamp, str):
         raise FormResponseSynchronizationError(
@@ -290,6 +339,11 @@ def _response_submitted_at(response: dict[str, Any]) -> datetime:
 def _single_answer_value(
     response: dict[str, Any], question_id: str, question_name: str, allow_empty: bool = False
 ) -> str:
+    """Return exactly one submitted value, optionally allowing an empty answer.
+
+    Raises:
+        FormResponseSynchronizationError: If the answer count is not valid.
+    """
     values = _answer_values(response, question_id)
     if not values and allow_empty:
         return ""
@@ -301,6 +355,11 @@ def _single_answer_value(
 
 
 def _answer_values(response: dict[str, Any], question_id: str) -> list[str]:
+    """Extract validated text-answer values for one Google question ID.
+
+    Raises:
+        FormResponseSynchronizationError: If the raw response answer hierarchy is invalid.
+    """
     answers = response.get("answers", {})
     if not isinstance(answers, dict):
         raise FormResponseSynchronizationError("Google response has invalid answers data.")

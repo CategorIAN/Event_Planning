@@ -29,7 +29,23 @@ class GoogleAuthorizationError(Exception):
 
 
 def get_authorized_credentials() -> Credentials:
-    """Load and refresh the shared token without interactive OAuth."""
+    """Load valid shared OAuth credentials without starting an OAuth browser flow.
+
+    Loads the authorized-user token from ``token.json`` (or its configured
+    override). If the token is expired and has a refresh token, refreshes it.
+    Refreshed credentials are written back only when the token path is
+    writable and is not a Render Secret File. If persistence is skipped, the
+    refreshed credentials are still returned for the current process. If the
+    token write raises ``OSError``, the function raises
+    ``GoogleAuthorizationError`` instead.
+
+    Returns:
+        Valid credentials containing every configured integration scope.
+
+    Raises:
+        GoogleAuthorizationError: If the token is missing, unreadable, lacks a
+            required scope, cannot be refreshed, or is not valid after refresh.
+    """
     token_path = _token_path()
 
     if not token_path.is_file():
@@ -78,7 +94,16 @@ def get_authorized_credentials() -> Credentials:
 
 
 def authorize_google_integrations() -> None:
-    """Run the installed-app flow and save one token with every integration scope."""
+    """Authorize Google integrations through the local installed-app OAuth flow.
+
+    Loads OAuth client credentials from ``credentials.json`` (or its
+    configured override), opens a local browser-based consent flow, and writes
+    one authorized-user token containing every configured integration scope.
+
+    Raises:
+        GoogleAuthorizationError: If client credentials are missing or the
+            OAuth flow or token write fails.
+    """
     credentials_path = _credentials_path()
 
     if not credentials_path.is_file():
@@ -101,6 +126,12 @@ def authorize_google_integrations() -> None:
 
 
 def _credentials_path() -> Path:
+    """Return the configured OAuth client-credentials file path.
+
+    Returns:
+        ``GOOGLE_CREDENTIALS_PATH`` when configured; otherwise the
+        repository-root ``credentials.json`` path.
+    """
     return Path(
         os.environ.get(
             "GOOGLE_CREDENTIALS_PATH",
@@ -110,6 +141,12 @@ def _credentials_path() -> Path:
 
 
 def _token_path() -> Path:
+    """Return the configured authorized-user token file path.
+
+    Returns:
+        ``GOOGLE_TOKEN_PATH`` when configured; otherwise the repository-root
+        ``token.json`` path.
+    """
     return Path(
         os.environ.get(
             "GOOGLE_TOKEN_PATH",

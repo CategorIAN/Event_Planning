@@ -11,6 +11,7 @@ class Day(models.Model):
         ordering = ["order"]
 
     def __str__(self):
+        """Return a human-readable representation."""
         return self.name
 
 
@@ -21,6 +22,7 @@ class Hour(models.Model):
         ordering = ["time"]
 
     def __str__(self):
+        """Return a human-readable representation."""
         return self.time.strftime("%I:%M %p").lstrip("0")
 
 
@@ -46,6 +48,7 @@ class DayHour(models.Model):
         ordering = ["day__order", "hour__time"]
 
     def __str__(self):
+        """Return a human-readable representation."""
         return f"{self.day} at {self.hour}"
 
 
@@ -74,6 +77,7 @@ class TimeSpan(models.Model):
 
     @property
     def duration_hours(self):
+        """Perform duration hours."""
         return self.end_hour.time.hour - self.start_hour.time.hour
 
     class Meta:
@@ -86,6 +90,7 @@ class TimeSpan(models.Model):
         ordering = ["day__order", "start_hour__time", "end_hour__time"]
 
     def __str__(self):
+        """Return a human-readable representation."""
         return f"{self.day} from {self.start_hour} to {self.end_hour}"
 
     @property
@@ -101,6 +106,7 @@ class Duration(models.Model):
     days = models.PositiveIntegerField()
 
     def __str__(self):
+        """Return a human-readable representation."""
         return self.name
 
 
@@ -109,6 +115,7 @@ class GameType(models.Model):
     url = models.URLField(blank=True)
 
     def __str__(self):
+        """Return a human-readable representation."""
         return self.name
 
 
@@ -138,6 +145,7 @@ class Game(models.Model):
     )
 
     def __str__(self):
+        """Return a human-readable representation."""
         return self.name
 
 
@@ -146,6 +154,7 @@ class Platform(models.Model):
     url = models.URLField(blank=True)
 
     def __str__(self):
+        """Return a human-readable representation."""
         return self.name
 
 
@@ -224,6 +233,7 @@ class Person(models.Model):
     )
 
     def __str__(self):
+        """Return a human-readable representation."""
         return self.name
 
 
@@ -243,6 +253,7 @@ class Form(models.Model):
     )
 
     def __str__(self):
+        """Return a human-readable representation."""
         return self.name
 
 
@@ -256,6 +267,7 @@ class FormQuestionGroup(models.Model):
     name = models.CharField(max_length=160)
 
     def __str__(self):
+        """Return a human-readable representation."""
         return f"{self.form}: {self.name}"
 
 
@@ -290,6 +302,7 @@ class FormQuestion(models.Model):
         ]
 
     def __str__(self):
+        """Return a human-readable representation."""
         return f"{self.form}: {self.name}"
 
     hour = models.ForeignKey(
@@ -359,6 +372,7 @@ class FormQuestionChoice(models.Model):
         ]
 
     def __str__(self):
+        """Return a human-readable representation."""
         return f"{self.google_value} → {self.value}"
 
 
@@ -378,6 +392,7 @@ class FormRequest(models.Model):
     requested_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
+        """Return a human-readable representation."""
         return f"{self.person} → {self.form}"
 
 
@@ -416,6 +431,7 @@ class FormSubmission(models.Model):
     )
 
     def __str__(self):
+        """Return a human-readable representation."""
         return f"{self.form}: {self.submitted_name} ({self.submitted_at})"
 
     class Meta:
@@ -453,6 +469,7 @@ class FormQuestionGroupChoice(models.Model):
         ]
 
     def __str__(self):
+        """Return a human-readable representation."""
         return f"{self.google_value} → {self.day or '(unmapped)'}"
 
 
@@ -496,6 +513,7 @@ class Event(models.Model):
         return self.happened is not None and not has_attending_invitation
 
     def __str__(self):
+        """Return a human-readable representation."""
         timestamp = self.timestamp.strftime(
             "%A, %B %d, %Y at %I:%M %p"
         ).replace(" 0", " ")
@@ -539,6 +557,7 @@ class Invitation(models.Model):
         ]
 
     def __str__(self):
+        """Return a human-readable representation."""
         return f"{self.person} — {self.event}"
 
 

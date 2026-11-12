@@ -1,4 +1,6 @@
 from django.core.management.base import BaseCommand, CommandError
+from argparse import ArgumentParser
+from typing import Any
 
 from planner.models import Form, Person
 from planner.services.survey_request_emails import (
@@ -11,7 +13,12 @@ from planner.services.survey_request_emails import (
 class SurveyRequestEmailCommand(BaseCommand):
     request_type = ""
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: ArgumentParser) -> None:
+        """Register the person ID and dry-run options.
+
+        Args:
+            parser: Command-line parser to configure for this command.
+        """
         parser.add_argument("--person-id", required=True, type=int)
         parser.add_argument(
             "--dry-run",
@@ -19,7 +26,19 @@ class SurveyRequestEmailCommand(BaseCommand):
             help="Preview the email without sending or recording a request.",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
+        """Send a survey request email or print a dry-run preview.
+
+        Args:
+            *args: Positional arguments supplied by Django. Unused.
+            **options: Parsed command options, including the integer person_id
+                and the boolean dry_run flag. A dry run previews the email
+                without sending it or recording a request.
+
+        Raises:
+            CommandError: If the person or form cannot be found, or if the
+                email helper raises SurveyRequestEmailError.
+        """
         try:
             person = Person.objects.get(pk=options["person_id"])
         except Person.DoesNotExist as error:

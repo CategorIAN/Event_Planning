@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand, CommandError
+from typing import Any
 
 from planner.models import Day, DayHour, Hour, TimeSpan
 
@@ -6,7 +7,16 @@ from planner.models import Day, DayHour, Hour, TimeSpan
 class Command(BaseCommand):
     help = "Create and configure all same-day TimeSpan records from DayHour data."
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
+        """Create or repair TimeSpans after verifying all DayHours exist.
+
+        Args:
+            *args: Framework-supplied positional command arguments. Unused.
+            **options: Framework-supplied command options. Unused.
+
+        Raises:
+            CommandError: If a Day lacks a required DayHour record.
+        """
         days = list(Day.objects.order_by("order"))
         hours = list(Hour.objects.order_by("time"))
         created_count = 0

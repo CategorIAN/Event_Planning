@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand, CommandError
+from typing import Any
 
 from planner.services.form_response_sync import (
     FormResponseSynchronizationError,
@@ -10,7 +11,16 @@ from planner.services.google_forms import GoogleFormsError
 class Command(BaseCommand):
     help = "Synchronize new responses from the configured Google Form."
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
+        """Synchronize configured Google Form responses and report the result.
+
+        Args:
+            *args: Framework-supplied positional command arguments. Unused.
+            **options: Framework-supplied command options. Unused.
+
+        Raises:
+            CommandError: If Google retrieval or response synchronization fails.
+        """
         try:
             summary = synchronize_google_form_responses()
         except (FormResponseSynchronizationError, GoogleFormsError) as error:

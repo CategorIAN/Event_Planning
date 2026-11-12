@@ -22,7 +22,11 @@ class GmailSendError(GmailError):
 
 
 def get_gmail_service():
-    """Return an authorized Gmail API v1 client without interactive OAuth."""
+    """Return an authorized Gmail API v1 client without interactive OAuth.
+
+    Raises:
+        GmailAuthorizationError: If the shared token cannot be loaded or refreshed.
+    """
     try:
         credentials = get_authorized_credentials()
     except GoogleAuthorizationError as error:
@@ -31,7 +35,19 @@ def get_gmail_service():
 
 
 def send_email(to_email: str, subject: str, body: str) -> str:
-    """Send a plain-text email and return the Gmail message ID."""
+    """Send a plain-text email and return Gmail's message ID.
+
+    Args:
+        to_email: Recipient email address.
+        subject: Plain-text email subject.
+        body: Plain-text email body.
+
+    Returns:
+        The Gmail API message ID for the sent message.
+
+    Raises:
+        GmailSendError: If Gmail rejects the send or omits a message ID.
+    """
     message = EmailMessage()
     message.set_content(body)
     message["To"] = to_email

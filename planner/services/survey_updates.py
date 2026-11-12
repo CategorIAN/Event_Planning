@@ -25,7 +25,14 @@ DUE_STATUSES = {INITIAL_REQUEST_DUE, RENEWAL_DUE, REMINDER_DUE}
 
 
 def default_request_type_for_status(status: str) -> str:
-    """Return the suggested email template for a survey-update status."""
+    """Return the suggested email template for a survey-update status.
+
+    Args:
+        status: One of this module's survey scheduling status labels.
+
+    Returns:
+        The request-type key accepted by the survey email service.
+    """
     return {
         INITIAL_REQUEST_DUE: INITIAL,
         RENEWAL_DUE: RENEWAL,
@@ -42,7 +49,15 @@ class SurveyUpdateSchedule:
 
 
 def add_calendar_months(value: datetime, months: int) -> datetime:
-    """Return a datetime shifted by calendar months, preserving its timezone."""
+    """Return a datetime shifted by calendar months, preserving its timezone.
+
+    Args:
+        value: Original aware or naive datetime.
+        months: Number of whole calendar months to add; may be negative.
+
+    Returns:
+        A datetime clamped to the last valid day of its destination month.
+    """
     month_index = value.month - 1 + months
     year = value.year + month_index // 12
     month = month_index % 12 + 1
@@ -57,7 +72,17 @@ def calculate_survey_update_schedule(
     last_submitted_at: datetime | None,
     now: datetime,
 ) -> SurveyUpdateSchedule:
-    """Calculate one person's survey-update state at a supplied point in time."""
+    """Calculate one person's survey-update state at a supplied point in time.
+
+    Args:
+        person_status: Current Person status used for renewal cadence.
+        last_requested_at: Latest survey-request timestamp, if any.
+        last_submitted_at: Latest survey-submission timestamp, if any.
+        now: Single captured timestamp used for strict overdue comparisons.
+
+    Returns:
+        The current status and next contact due timestamp.
+    """
     if last_requested_at is None and last_submitted_at is None:
         return SurveyUpdateSchedule(INITIAL_REQUEST_DUE, now)
 

@@ -14,6 +14,7 @@ class Command(BaseCommand):
     help = "Retrieve and print all Google Form responses as raw JSON."
 
     def add_arguments(self, parser):
+        """Perform add arguments."""
         parser.add_argument(
             "form_id",
             nargs="?",
@@ -22,6 +23,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        """Perform handle."""
         try:
             data = get_form_responses(options["form_id"])
         except GoogleFormsError as error:

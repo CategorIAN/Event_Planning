@@ -32,7 +32,11 @@ class GoogleFormsRetrievalError(GoogleFormsError):
 
 
 def get_forms_service():
-    """Return an authenticated Google Forms API v1 service client."""
+    """Return an authenticated Google Forms API v1 service client.
+
+    Raises:
+        GoogleFormsAuthenticationError: If shared OAuth credentials are unavailable.
+    """
     try:
         credentials = get_authorized_credentials()
     except GoogleAuthorizationError as error:
@@ -43,7 +47,17 @@ def get_forms_service():
 
 
 def get_form(form_id: str) -> dict[str, Any]:
-    """Retrieve a Google Form definition by its Google Forms ID."""
+    """Retrieve a Google Form definition by its Google Forms ID.
+
+    Args:
+        form_id: Nonempty Google Forms resource ID.
+
+    Returns:
+        The unmodified Google Forms API response object.
+
+    Raises:
+        GoogleFormsRetrievalError: If the form is invalid, inaccessible, or malformed.
+    """
     if not form_id:
         raise GoogleFormsRetrievalError("A Google Form ID is required.")
 
@@ -64,14 +78,32 @@ def get_form(form_id: str) -> dict[str, Any]:
 
 
 def get_form_questions(form_id: str) -> list[dict[str, str | None]]:
-    """Return the normal and grid-row questions in a Google Form."""
+    """Return metadata for normal and grid-row questions in a Google Form.
+
+    Args:
+        form_id: Google Forms resource ID.
+
+    Returns:
+        Flattened question metadata, including grid rows.
+    """
     return _extract_questions(get_form(form_id))
 
 
 def get_form_responses(
     form_id: str, submitted_after: datetime | None = None
 ) -> dict[str, list[dict[str, Any]]]:
-    """Retrieve every submitted response for a Google Form without altering answers."""
+    """Retrieve every submitted response without altering answer data.
+
+    Args:
+        form_id: Nonempty Google Forms resource ID.
+        submitted_after: Optional timezone-aware exclusive timestamp filter.
+
+    Returns:
+        A mapping with all paginated response objects under ``responses``.
+
+    Raises:
+        GoogleFormsRetrievalError: If the API response is inaccessible or malformed.
+    """
     if not form_id:
         raise GoogleFormsRetrievalError("A Google Form ID is required.")
 
@@ -123,6 +155,11 @@ def get_form_responses(
 
 
 def _response_filter(submitted_after: datetime) -> str:
+    """Build the Google Forms timestamp filter for an aware datetime.
+
+    Raises:
+        GoogleFormsRetrievalError: If the timestamp is naive.
+    """
     if submitted_after.tzinfo is None:
         raise GoogleFormsRetrievalError(
             "The submitted-after timestamp must include timezone information."
@@ -133,6 +170,11 @@ def _response_filter(submitted_after: datetime) -> str:
 
 
 def _extract_questions(form: dict[str, Any]) -> list[dict[str, str | None]]:
+    """Extract normal questions and individual grid-row questions from a form.
+
+    Raises:
+        GoogleFormsRetrievalError: If the form hierarchy is malformed.
+    """
     items = form.get("items", [])
     if not isinstance(items, list):
         raise GoogleFormsRetrievalError("Google Forms API returned invalid form items.")
@@ -177,6 +219,11 @@ def _extract_questions(form: dict[str, Any]) -> list[dict[str, str | None]]:
 def _question_data(
     question: Any, title: Any, item_id: str | None
 ) -> dict[str, str | None]:
+    """Validate one raw question and return its display metadata.
+
+    Raises:
+        GoogleFormsRetrievalError: If required question metadata is invalid.
+    """
     if not isinstance(question, dict):
         raise GoogleFormsRetrievalError("Google Forms API returned an invalid question.")
 
@@ -195,6 +242,7 @@ def _question_data(
 
 
 def _question_type(question: dict[str, Any]) -> str | None:
+    """Return the normalized type label for a raw Google question object."""
     question_types = {
         "choiceQuestion": "choice",
         "textQuestion": "text",

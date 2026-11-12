@@ -18,6 +18,7 @@ class Command(BaseCommand):
     help = "Retrieve and print a Google Form's questions and question IDs."
 
     def add_arguments(self, parser):
+        """Perform add arguments."""
         parser.add_argument(
             "form_id",
             nargs="?",
@@ -31,6 +32,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        """Perform handle."""
         try:
             form = get_form(options["form_id"])
             output_path = save_json(form, options["form_id"])

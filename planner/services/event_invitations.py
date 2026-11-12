@@ -78,7 +78,11 @@ class EventInvitationResult:
 
 
 def build_event_invitation_email(event: Event, person: Person) -> EventInvitationEmail:
-    """Build invitation content without sending or recording it."""
+    """Build invitation content without sending or recording it.
+
+    Raises:
+        EventInvitationValidationError: If recipient email or player capacity is invalid.
+    """
     _validate_email_recipient(person)
     if event.game.max_players is None:
         raise EventInvitationValidationError(
@@ -131,7 +135,14 @@ Ian"""
 
 
 def send_event_invitation(event: Event, person: Person) -> EventInvitationResult:
-    """Send one eligible Event invitation and record it as Pending."""
+    """Send one eligible Event invitation and record it as Pending.
+
+    Sends Gmail before creating the Invitation record. A record-creation failure
+    therefore reports that the email was sent and must not be retried blindly.
+
+    Raises:
+        EventInvitationError: If eligibility, Gmail delivery, or recording fails.
+    """
     if Invitation.objects.filter(event=event, person=person).exists():
         raise EventInvitationAlreadyExistsError(
             f"{person.name} already has an invitation for this Event; no email was sent."
@@ -188,7 +199,11 @@ def get_current_attendance(event: Event) -> int:
 
 
 def record_event_happened(event: Event, happened: bool) -> Event:
-    """Record whether an Event occurred and restore attendees to Waiting if it did not."""
+    """Record whether an Event occurred and restore attendees to Waiting if it did not.
+
+    The reset prevents an event marked as not happened from counting planned
+    attendees as attendance history.
+    """
     with transaction.atomic():
         event = Event.objects.select_for_update().get(pk=event.pk)
         changed_to_no = happened is False and event.happened is not False
@@ -209,7 +224,11 @@ def update_invitation_result(
     *,
     allowed_results: frozenset[str],
 ) -> Invitation:
-    """Update an invitation only within its permitted workflow state set."""
+    """Update an invitation only within its permitted workflow state set.
+
+    Raises:
+        EventInvitationUpdateError: If the invitation or transition is invalid.
+    """
     if result not in allowed_results:
         raise EventInvitationUpdateError("That result is not allowed in this workflow.")
     try:
@@ -230,7 +249,11 @@ def update_invitation_result(
 def adjust_invitation_plus_ones(
     event: Event, invitation_id: int, delta: int
 ) -> Invitation:
-    """Adjust plus ones by one without allowing a negative value."""
+    """Adjust plus ones by one without allowing a negative value.
+
+    Raises:
+        EventInvitationUpdateError: If the invitation is absent or count is invalid.
+    """
     if delta not in {-1, 1}:
         raise EventInvitationUpdateError("Plus ones can only change by one at a time.")
     try:
@@ -248,6 +271,11 @@ def adjust_invitation_plus_ones(
 
 
 def _validate_email_recipient(person: Person) -> None:
+    """Validate that a Person has a nonempty syntactically valid email address.
+
+    Raises:
+        EventInvitationValidationError: If the email is missing or invalid.
+    """
     if not person.email or not person.email.strip():
         raise EventInvitationValidationError("The person does not have an email address.")
     try:

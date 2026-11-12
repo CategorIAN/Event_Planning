@@ -25,7 +25,14 @@ class InvitationListRow:
 
 
 def get_invitation_list(event: Event) -> list[InvitationListRow]:
-    """Return eligible people satisfying the normal invitation priority rule."""
+    """Return eligible people satisfying the normal invitation priority rule.
+
+    Args:
+        event: Event whose game, TimeSpan, and invitation history are evaluated.
+
+    Returns:
+        Eligible invitation rows in priority order.
+    """
     required_day_hour_ids = day_hour_ids(event.time_span.day_hours.all())
 
     people = (
@@ -94,10 +101,12 @@ def get_invitation_list(event: Event) -> list[InvitationListRow]:
 
 
 def _latest_invite(invitations: list[Invitation]) -> datetime | None:
+    """Return the latest invitation timestamp, if any."""
     return max((invitation.invited_at for invitation in invitations), default=None)
 
 
 def _latest_attendance(invitations: list[Invitation]) -> datetime | None:
+    """Return the latest attended or attending Event timestamp, if any."""
     return max(
         (
             invitation.event.timestamp
@@ -109,6 +118,7 @@ def _latest_attendance(invitations: list[Invitation]) -> datetime | None:
 
 
 def _latest_wait(invitations: list[Invitation]) -> datetime | None:
+    """Return the latest Waiting invitation timestamp, if any."""
     return max(
         (
             invitation.invited_at
@@ -122,12 +132,14 @@ def _latest_wait(invitations: list[Invitation]) -> datetime | None:
 def _expected_datetime(
     latest: datetime | None, cooldown: timedelta | None
 ) -> datetime | None:
+    """Return the cooldown date when both inputs are available."""
     if latest is None or cooldown is None:
         return None
     return latest + cooldown
 
 
 def _invitation_list_sort_key(row: InvitationListRow) -> tuple:
+    """Return the deterministic priority key for an invitation-list row."""
     return (
         not row.redeem,
         not row.new,

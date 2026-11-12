@@ -59,6 +59,7 @@ def staff_required(view_func):
     """Allow administrative views only for authenticated staff users."""
     @wraps(view_func)
     def wrapped_view(request: HttpRequest, *args, **kwargs):
+        """Perform wrapped view."""
         if not request.user.is_authenticated:
             return redirect_to_login(request.get_full_path())
         if not request.user.is_active or not request.user.is_staff:
@@ -69,6 +70,7 @@ def staff_required(view_func):
 
 
 def home(request: HttpRequest) -> HttpResponse:
+    """Perform home."""
     return render(request, "planner/home.html")
 
 
@@ -202,12 +204,14 @@ def _availability_cell_class(
 
 @staff_required
 def events(request: HttpRequest) -> HttpResponse:
+    """Perform events."""
     return _render_events_page(request, EventForm())
 
 
 @staff_required
 @require_POST
 def create_event(request: HttpRequest) -> HttpResponse:
+    """Perform create event."""
     event_form = EventForm(request.POST)
     if event_form.is_valid():
         event = event_form.save()
@@ -221,6 +225,7 @@ def create_event(request: HttpRequest) -> HttpResponse:
 def send_event_invitation_from_events(
     request: HttpRequest, event_id: int, person_id: int
 ) -> HttpResponse:
+    """Perform send event invitation from events."""
     event = get_object_or_404(Event, pk=event_id)
     person = get_object_or_404(Person, pk=person_id)
     try:
@@ -238,6 +243,7 @@ def send_event_invitation_from_events(
 @staff_required
 @require_POST
 def update_event_happened(request: HttpRequest, event_id: int) -> HttpResponse:
+    """Perform update event happened."""
     event = get_object_or_404(Event, pk=event_id)
     happened_values = {"yes": True, "no": False}
     happened = happened_values.get(request.POST.get("happened"))
@@ -261,6 +267,7 @@ def update_event_happened(request: HttpRequest, event_id: int) -> HttpResponse:
 def update_event_invitation_result(
     request: HttpRequest, event_id: int, invitation_id: int
 ) -> HttpResponse:
+    """Perform update event invitation result."""
     event = get_object_or_404(Event, pk=event_id)
     workflow = request.POST.get("workflow", "pre_game")
     allowed_results = {
@@ -302,6 +309,7 @@ def update_event_invitation_result(
 def update_event_invitation_plus_ones(
     request: HttpRequest, event_id: int, invitation_id: int
 ) -> HttpResponse:
+    """Perform update event invitation plus ones."""
     event = get_object_or_404(Event, pk=event_id)
     try:
         delta = int(request.POST.get("delta", ""))
@@ -334,6 +342,7 @@ def _render_events_page(
     *,
     status: int = 200,
 ) -> HttpResponse:
+    """Perform render events page."""
     now = timezone.now()
     attending_invitations = Invitation.objects.filter(
         event=OuterRef("pk"),
@@ -405,6 +414,7 @@ def _render_events_page(
 
 
 def _review_status_label(reviewed: bool | None) -> str:
+    """Perform review status label."""
     return {
         False: "Needs Review",
         None: "Upcoming",
@@ -413,6 +423,7 @@ def _review_status_label(reviewed: bool | None) -> str:
 
 
 def _event_invitation_columns(event: Event | None) -> list[dict[str, object]]:
+    """Perform event invitation columns."""
     columns = [
         {"value": value, "label": label, "invitations": []}
         for value, label in Invitation.Result.choices
@@ -431,6 +442,7 @@ def _event_invitation_columns(event: Event | None) -> list[dict[str, object]]:
 
 
 def _post_game_invitations(event: Event | None) -> list[Invitation]:
+    """Perform post game invitations."""
     if event is None:
         return []
     return list(
@@ -441,6 +453,7 @@ def _post_game_invitations(event: Event | None) -> list[Invitation]:
 
 
 def _result_choices(allowed_results: frozenset[str]) -> list[tuple[str, str]]:
+    """Perform result choices."""
     return [
         (value, label)
         for value, label in Invitation.Result.choices
@@ -449,11 +462,13 @@ def _result_choices(allowed_results: frozenset[str]) -> list[tuple[str, str]]:
 
 
 def _events_url(event: Event) -> str:
+    """Perform events url."""
     return f"{reverse('events')}?{urlencode({'event_id': event.pk})}"
 
 
 @staff_required
 def form_submissions(request: HttpRequest) -> HttpResponse:
+    """Perform form submissions."""
     unmatched_submissions = list(
         FormSubmission.objects.filter(person__isnull=True).order_by("submitted_at")
     )
@@ -481,6 +496,7 @@ def form_submissions(request: HttpRequest) -> HttpResponse:
 @staff_required
 @require_POST
 def sync_google_form_responses(request: HttpRequest) -> HttpResponse:
+    """Perform sync google form responses."""
     try:
         summary = synchronize_google_form_responses()
     except (FormResponseSynchronizationError, GoogleFormsError) as error:
@@ -499,6 +515,7 @@ def sync_google_form_responses(request: HttpRequest) -> HttpResponse:
 def create_person_from_submission(
     request: HttpRequest, submission_id: int
 ) -> HttpResponse:
+    """Perform create person from submission."""
     try:
         with transaction.atomic():
             submission = get_object_or_404(
@@ -526,6 +543,7 @@ def create_person_from_submission(
 def update_person_from_submission(
     request: HttpRequest, submission_id: int, person_id: int
 ) -> HttpResponse:
+    """Perform update person from submission."""
     try:
         with transaction.atomic():
             submission = get_object_or_404(
@@ -550,6 +568,7 @@ def update_person_from_submission(
 
 @staff_required
 def survey_updates(request: HttpRequest) -> HttpResponse:
+    """Perform survey updates."""
     selected_form, form_error = _select_survey_form()
     due_only = request.GET.get("due_only") == "1"
     context = _survey_update_context(request, selected_form, form_error, due_only)
@@ -562,6 +581,7 @@ def survey_updates(request: HttpRequest) -> HttpResponse:
 @staff_required
 @require_POST
 def mark_survey_requested(request: HttpRequest) -> HttpResponse:
+    """Perform mark survey requested."""
     request_form = SendSurveyRequestForm(request.POST)
     due_only = request.POST.get("due_only") == "1"
 
@@ -612,6 +632,7 @@ def mark_survey_requested(request: HttpRequest) -> HttpResponse:
 
 
 def _select_survey_form() -> tuple[Form | None, str | None]:
+    """Perform select survey form."""
     if not settings.GENERAL_SURVEY_FORM_ID:
         return None, "GENERAL_SURVEY_FORM_ID is not configured."
     try:
@@ -631,6 +652,7 @@ def _survey_update_context(
     *,
     form_errors: dict[int, SendSurveyRequestForm] | None = None,
 ) -> dict[str, object]:
+    """Perform survey update context."""
     rows = []
     now = timezone.now()
     if selected_form is not None:
@@ -712,6 +734,7 @@ def _render_survey_request_error(
     request_form: SendSurveyRequestForm,
     due_only: bool,
 ) -> HttpResponse:
+    """Perform render survey request error."""
     messages.error(request, "The survey request could not be sent.")
     selected_form, form_error = _select_survey_form()
     form_errors = {}
@@ -748,6 +771,7 @@ def _store_email_confirmation(
 
 
 def _survey_updates_url(due_only: bool) -> str:
+    """Perform survey updates url."""
     parameters = {}
     if due_only:
         parameters["due_only"] = "1"

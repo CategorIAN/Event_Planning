@@ -60,11 +60,13 @@ from planner.services.survey_request_emails import (
 
 
 def aware(year, month, day, hour=12, minute=0):
+    """Perform aware."""
     return datetime(year, month, day, hour, minute, tzinfo=datetime_timezone.utc)
 
 
 class SurveyUpdateScheduleTests(TestCase):
     def test_initial_request_is_due_now(self):
+        """Test initial request is due now."""
         now = aware(2026, 9, 29)
         schedule = calculate_survey_update_schedule(
             person_status=Person.Status.ACTIVE,
@@ -76,6 +78,7 @@ class SurveyUpdateScheduleTests(TestCase):
         self.assertEqual(schedule.next_contact_due, now)
 
     def test_active_renewal_is_due_after_six_calendar_months(self):
+        """Test active renewal is due after six calendar months."""
         schedule = calculate_survey_update_schedule(
             person_status=Person.Status.ACTIVE,
             last_requested_at=None,
@@ -85,6 +88,7 @@ class SurveyUpdateScheduleTests(TestCase):
         self.assertEqual(schedule.status, RENEWAL_DUE)
 
     def test_not_now_renewal_is_due_after_three_calendar_months(self):
+        """Test not now renewal is due after three calendar months."""
         schedule = calculate_survey_update_schedule(
             person_status=Person.Status.NOT_NOW,
             last_requested_at=None,
@@ -94,6 +98,7 @@ class SurveyUpdateScheduleTests(TestCase):
         self.assertEqual(schedule.status, RENEWAL_DUE)
 
     def test_reminder_is_due_after_one_calendar_month(self):
+        """Test reminder is due after one calendar month."""
         schedule = calculate_survey_update_schedule(
             person_status=Person.Status.ACTIVE,
             last_requested_at=aware(2026, 8, 28),
@@ -103,6 +108,7 @@ class SurveyUpdateScheduleTests(TestCase):
         self.assertEqual(schedule.status, REMINDER_DUE)
 
     def test_new_request_restarts_reminder_interval(self):
+        """Test new request restarts reminder interval."""
         schedule = calculate_survey_update_schedule(
             person_status=Person.Status.ACTIVE,
             last_requested_at=aware(2026, 9, 20),
@@ -113,6 +119,7 @@ class SurveyUpdateScheduleTests(TestCase):
         self.assertEqual(schedule.next_contact_due, aware(2026, 10, 20))
 
     def test_submission_at_same_time_as_request_answers_it(self):
+        """Test submission at same time as request answers it."""
         submitted_at = aware(2026, 9, 28)
         schedule = calculate_survey_update_schedule(
             person_status=Person.Status.ACTIVE,
@@ -123,6 +130,7 @@ class SurveyUpdateScheduleTests(TestCase):
         self.assertEqual(schedule.status, CURRENT)
 
     def test_calendar_month_boundaries_and_strict_overdue_comparison(self):
+        """Test calendar month boundaries and strict overdue comparison."""
         self.assertEqual(add_calendar_months(aware(2026, 1, 31), 1), aware(2026, 2, 28))
         schedule = calculate_survey_update_schedule(
             person_status=Person.Status.ACTIVE,
@@ -136,6 +144,7 @@ class SurveyUpdateScheduleTests(TestCase):
 @override_settings(GENERAL_SURVEY_FORM_ID="general-survey")
 class SurveyUpdatesViewTests(TestCase):
     def setUp(self):
+        """Create fixtures for this test case."""
         self.staff_user = get_user_model().objects.create_user(
             username="survey-staff",
             password="test-password",
@@ -156,6 +165,7 @@ class SurveyUpdatesViewTests(TestCase):
         )
 
     def test_other_form_requests_and_submissions_do_not_affect_selected_form(self):
+        """Test other form requests and submissions do not affect selected form."""
         FormRequest.objects.create(
             person=self.person,
             form=self.other_form,
@@ -179,6 +189,7 @@ class SurveyUpdatesViewTests(TestCase):
         self.assertEqual(rows[0].schedule.status, INITIAL_REQUEST_DUE)
 
     def test_request_count_and_row_highlighting_use_requests_after_submission(self):
+        """Test request count and row highlighting use requests after submission."""
         FormSubmission.objects.create(
             person=self.person,
             form=self.general_form,
@@ -219,6 +230,7 @@ class SurveyUpdatesViewTests(TestCase):
         self.assertContains(response, 'class="request-count-danger"')
 
     def _request_payload(self, *, due_only=False, request_type=INITIAL):
+        """Perform request payload."""
         query = "?"
         if due_only:
             query += "due_only=1"
@@ -233,6 +245,7 @@ class SurveyUpdatesViewTests(TestCase):
         }
 
     def test_default_request_type_mappings(self):
+        """Test default request type mappings."""
         self.assertEqual(default_request_type_for_status(INITIAL_REQUEST_DUE), INITIAL)
         self.assertEqual(default_request_type_for_status(RENEWAL_DUE), RENEWAL)
         self.assertEqual(default_request_type_for_status(REMINDER_DUE), REMINDER)
@@ -244,7 +257,9 @@ class SurveyUpdatesViewTests(TestCase):
 
     @patch("planner.views.request_survey_email")
     def test_valid_post_sends_selected_type_once_and_preserves_filter(self, mocked_send):
+        """Test valid post sends selected type once and preserves filter."""
         def send_and_record(person, form, request_type):
+            """Perform send and record."""
             FormRequest.objects.create(person=person, form=form)
             return SurveyRequestResult(
                 email=SurveyEmail(person.email, "Manual override", "Actual sent body"),
@@ -271,6 +286,7 @@ class SurveyUpdatesViewTests(TestCase):
 
     @patch("planner.views.request_survey_email")
     def test_failed_send_does_not_create_request_or_confirmation(self, mocked_send):
+        """Test failed send does not create request or confirmation."""
         mocked_send.side_effect = SurveyRequestSendError("Gmail unavailable")
         response = self.client.post(
             reverse("mark_survey_requested"),
@@ -286,6 +302,7 @@ class SurveyUpdatesViewTests(TestCase):
     def test_recording_failure_shows_sent_email_without_creating_request(
         self, mocked_send
     ):
+        """Test recording failure shows sent email without creating request."""
         sent_email = SurveyEmail(self.person.email, "Sent subject", "Sent body")
         mocked_send.side_effect = SurveyRequestRecordingError(
             "The email was sent but could not be recorded.",
@@ -305,6 +322,7 @@ class SurveyUpdatesViewTests(TestCase):
         self.assertEqual(confirmation["subject"], "Sent subject")
 
     def test_invalid_request_type_does_not_send_or_create_request(self):
+        """Test invalid request type does not send or create request."""
         payload = self._request_payload()
         payload["request_type"] = "invalid"
         response = self.client.post(reverse("mark_survey_requested"), payload)
@@ -313,6 +331,7 @@ class SurveyUpdatesViewTests(TestCase):
         self.assertFalse(FormRequest.objects.exists())
 
     def test_please_remove_person_cannot_create_request(self):
+        """Test please remove person cannot create request."""
         response = self.client.get(reverse("survey_updates"))
         # Please Remove people are not rendered, and a forged POST is rejected too.
         payload = {
@@ -329,6 +348,7 @@ class SurveyUpdatesViewTests(TestCase):
 class GmailServiceTests(TestCase):
     @patch("planner.services.gmail.get_gmail_service")
     def test_send_email_uses_urlsafe_base64_mime_message(self, get_gmail_service):
+        """Test send email uses urlsafe base64 mime message."""
         service = MagicMock()
         get_gmail_service.return_value = service
         service.users().messages().send().execute.return_value = {"id": "gmail-message-id"}
@@ -351,6 +371,7 @@ class GmailServiceTests(TestCase):
 
 class SurveyRequestEmailTests(TestCase):
     def setUp(self):
+        """Create fixtures for this test case."""
         self.person = Person.objects.create(
             name="Ian Kessler", email="ian@example.com"
         )
@@ -361,6 +382,7 @@ class SurveyRequestEmailTests(TestCase):
         )
 
     def test_all_email_templates(self):
+        """Test all email templates."""
         initial = build_survey_request_email(self.person, self.form, INITIAL)
         renewal = build_survey_request_email(self.person, self.form, RENEWAL)
         reminder = build_survey_request_email(self.person, self.form, REMINDER)
@@ -380,6 +402,7 @@ class SurveyRequestEmailTests(TestCase):
         self.assertIn(self.form.survey_url, reminder.body)
 
     def test_validation_failures(self):
+        """Test validation failures."""
         self.person.email = ""
         with self.assertRaises(SurveyRequestValidationError):
             build_survey_request_email(self.person, self.form, INITIAL)
@@ -396,6 +419,7 @@ class SurveyRequestEmailTests(TestCase):
 
     @patch("planner.services.survey_request_emails.send_email")
     def test_successful_send_records_form_request(self, mocked_send_email):
+        """Test successful send records form request."""
         mocked_send_email.return_value = "gmail-message-id"
 
         result = request_survey_email(self.person, self.form, RENEWAL)
@@ -410,6 +434,7 @@ class SurveyRequestEmailTests(TestCase):
 
     @patch("planner.services.survey_request_emails.send_email")
     def test_failed_send_does_not_record_form_request(self, mocked_send_email):
+        """Test failed send does not record form request."""
         mocked_send_email.side_effect = GmailSendError("Gmail failed")
 
         with self.assertRaises(SurveyRequestSendError):
@@ -422,6 +447,7 @@ class SurveyRequestEmailTests(TestCase):
     def test_recording_failure_reports_sent_email_without_resending(
         self, mocked_send_email, mocked_create
     ):
+        """Test recording failure reports sent email without resending."""
         mocked_send_email.return_value = "gmail-message-id"
         mocked_create.side_effect = DatabaseError("database unavailable")
 
@@ -434,6 +460,7 @@ class SurveyRequestEmailTests(TestCase):
 
     @patch("planner.services.survey_request_emails.send_email")
     def test_dry_run_does_not_send_or_record(self, mocked_send_email):
+        """Test dry run does not send or record."""
         result = request_survey_email(self.person, self.form, INITIAL, dry_run=True)
 
         self.assertIsNone(result.message_id)
@@ -444,6 +471,7 @@ class SurveyRequestEmailTests(TestCase):
 
 class CreateTimeSpansCommandTests(TestCase):
     def setUp(self):
+        """Create fixtures for this test case."""
         self.day = Day.objects.create(name="Saturday", order=6)
         self.hours = [
             Hour.objects.create(time=time(hour, 0)) for hour in (16, 17, 18, 19)
@@ -452,6 +480,7 @@ class CreateTimeSpansCommandTests(TestCase):
             DayHour.objects.create(day=self.day, hour=hour_record)
 
     def test_creates_half_open_spans_and_repairs_existing_relationships(self):
+        """Test creates half open spans and repairs existing relationships."""
         call_command("create_time_spans")
 
         self.assertEqual(TimeSpan.objects.count(), 6)
@@ -475,6 +504,7 @@ class CreateTimeSpansCommandTests(TestCase):
 
 class AvailabilityViewTests(TestCase):
     def setUp(self):
+        """Create fixtures for this test case."""
         self.staff_user = get_user_model().objects.create_user(
             username="availability-staff",
             password="test-password",
@@ -535,6 +565,7 @@ class AvailabilityViewTests(TestCase):
         )
 
     def test_counts_only_people_available_for_entire_valid_time_span(self):
+        """Test counts only people available for entire valid time span."""
         response = self.client.get(reverse("availability"))
 
         self.assertEqual(response.status_code, 200)
@@ -562,6 +593,7 @@ class AvailabilityViewTests(TestCase):
 
 class InvitationListServiceTests(TestCase):
     def setUp(self):
+        """Create fixtures for this test case."""
         self.staff_user = get_user_model().objects.create_user(
             username="event-staff",
             password="test-password",
@@ -659,12 +691,14 @@ class InvitationListServiceTests(TestCase):
         self.not_now_person.save(update_fields=["status"])
 
     def _eligible_person(self, name):
+        """Perform eligible person."""
         person = Person.objects.create(name=name, email=f"{name.lower().replace(' ', '')}@example.com")
         person.games.add(self.game)
         person.availability.add(*self.required_day_hours)
         return person
 
     def test_builds_and_orders_derived_invitation_rows(self):
+        """Test builds and orders derived invitation rows."""
         rows = get_invitation_list(self.event)
         rows_by_name = {row.person.name: row for row in rows}
 
@@ -691,6 +725,7 @@ class InvitationListServiceTests(TestCase):
         )
 
     def test_events_page_displays_selected_event_and_invitation_list(self):
+        """Test events page displays selected event and invitation list."""
         response = self.client.get(reverse("events"), {"event_id": self.event.pk})
 
         self.assertEqual(response.status_code, 200)
@@ -701,6 +736,7 @@ class InvitationListServiceTests(TestCase):
         self.assertContains(response, "Leader")
 
     def test_event_form_defaults_to_owner_but_preserves_existing_leader(self):
+        """Test event form defaults to owner but preserves existing leader."""
         new_event_form = EventForm()
         existing_event_form = EventForm(instance=self.event)
 
@@ -708,6 +744,7 @@ class InvitationListServiceTests(TestCase):
         self.assertEqual(existing_event_form["leader"].value(), self.leader.pk)
 
     def test_create_event_post_creates_and_selects_event(self):
+        """Test create event post creates and selects event."""
         response = self.client.post(
             reverse("create_event"),
             {
@@ -727,6 +764,7 @@ class InvitationListServiceTests(TestCase):
 
     @patch("planner.views.send_event_invitation")
     def test_events_page_invite_action_uses_event_invitation_service(self, mocked_send):
+        """Test events page invite action uses event invitation service."""
         mocked_send.return_value.message_id = "gmail-message-id"
 
         response = self.client.post(
@@ -740,6 +778,7 @@ class InvitationListServiceTests(TestCase):
         mocked_send.assert_called_once_with(self.event, self.new_person)
 
     def _create_board_invitation(self, name, result, plus_ones=0):
+        """Perform create board invitation."""
         person = Person.objects.create(
             name=name,
             email=f"{name.lower().replace(' ', '')}@example.com",
@@ -753,6 +792,7 @@ class InvitationListServiceTests(TestCase):
         )
 
     def test_pre_game_board_and_post_game_table_show_the_correct_records(self):
+        """Test pre game board and post game table show the correct records."""
         board_invitations = {
             value: self._create_board_invitation(label, value)
             for value, label in Invitation.Result.choices
@@ -817,6 +857,7 @@ class InvitationListServiceTests(TestCase):
         )
 
     def test_invitation_result_update_validates_event_and_result(self):
+        """Test invitation result update validates event and result."""
         invitation = self._create_board_invitation("Pending Person", Invitation.Result.PENDING)
 
         response = self.client.post(
@@ -865,6 +906,7 @@ class InvitationListServiceTests(TestCase):
         self.assertEqual(other_invitation.result, Invitation.Result.PENDING)
 
     def test_post_game_attendance_updates_and_rejects_cross_workflow_transitions(self):
+        """Test post game attendance updates and rejects cross workflow transitions."""
         invitation = self._create_board_invitation(
             "Attendance Person", Invitation.Result.ATTENDING
         )
@@ -910,6 +952,7 @@ class InvitationListServiceTests(TestCase):
         self.assertEqual(pending.result, Invitation.Result.PENDING)
 
     def test_recording_that_an_event_did_not_happen_returns_attendees_to_waiting(self):
+        """Test recording that an event did not happen returns attendees to waiting."""
         attending = self._create_board_invitation(
             "Attending Person", Invitation.Result.ATTENDING
         )
@@ -939,6 +982,7 @@ class InvitationListServiceTests(TestCase):
         self.assertIs(self.event.happened, True)
 
     def test_plus_one_updates_persist_and_cannot_go_below_zero(self):
+        """Test plus one updates persist and cannot go below zero."""
         invitation = self._create_board_invitation("Plus One Person", Invitation.Result.PENDING)
         update_url = reverse(
             "update_event_invitation_plus_ones",
@@ -963,6 +1007,7 @@ class InvitationListServiceTests(TestCase):
 
 class EventReviewTests(TestCase):
     def setUp(self):
+        """Create fixtures for this test case."""
         self.staff_user = get_user_model().objects.create_user(
             username="review-staff",
             password="test-password",
@@ -985,6 +1030,7 @@ class EventReviewTests(TestCase):
         )
 
     def _event(self, name, timestamp, *, happened=None):
+        """Perform event."""
         return Event.objects.create(
             game=Game.objects.create(name=name, game_type=self.game_type),
             time_span=self.time_span,
@@ -994,6 +1040,7 @@ class EventReviewTests(TestCase):
         )
 
     def test_reviewed_property_has_all_three_states(self):
+        """Test reviewed property has all three states."""
         now = timezone.now()
         upcoming = self._event("Upcoming", now + timedelta(days=1))
         unrecorded = self._event("Unrecorded", now - timedelta(days=1))
@@ -1012,6 +1059,7 @@ class EventReviewTests(TestCase):
         self.assertFalse(attending.reviewed)
 
     def test_events_are_prioritized_and_labeled_by_review_status(self):
+        """Test events are prioritized and labeled by review status."""
         now = timezone.now()
         needs_newer = self._event("Needs Newer", now - timedelta(days=1))
         needs_older = self._event("Needs Older", now - timedelta(days=2))
@@ -1056,6 +1104,7 @@ class EventReviewTests(TestCase):
 
 class EventInvitationServiceTests(TestCase):
     def setUp(self):
+        """Create fixtures for this test case."""
         self.day = Day.objects.create(name="Saturday", order=6)
         self.start_hour = Hour.objects.create(time=time(16, 0))
         self.end_hour = Hour.objects.create(time=time(18, 0))
@@ -1101,6 +1150,7 @@ class EventInvitationServiceTests(TestCase):
         )
 
     def _eligible_person(self, name):
+        """Perform eligible person."""
         person = Person.objects.create(
             name=name,
             email=f"{name.lower()}@example.com",
@@ -1110,6 +1160,7 @@ class EventInvitationServiceTests(TestCase):
         return person
 
     def test_builds_email_with_event_details_attendance_and_links(self):
+        """Test builds email with event details attendance and links."""
         email = build_event_invitation_email(self.event, self.recipient)
 
         self.assertIn("Catan", email.body)
@@ -1125,6 +1176,7 @@ class EventInvitationServiceTests(TestCase):
         self.assertIn("only reserved after you respond", email.body)
 
     def test_plus_one_language_is_omitted_when_fewer_than_two_spots_remain(self):
+        """Test plus one language is omitted when fewer than two spots remain."""
         self.game.max_players = 4
         self.game.save(update_fields=["max_players"])
 
@@ -1134,6 +1186,7 @@ class EventInvitationServiceTests(TestCase):
         self.assertNotIn("welcome to bring a plus one", email.body)
 
     def test_leader_and_attending_invitation_plus_ones_are_counted_once(self):
+        """Test leader and attending invitation plus ones are counted once."""
         Invitation.objects.create(
             event=self.event,
             person=self.leader,
@@ -1145,11 +1198,13 @@ class EventInvitationServiceTests(TestCase):
         self.assertEqual(get_current_attendance(self.event), 5)
 
     def test_owner_who_is_also_leader_counts_as_one_automatic_attendee(self):
+        """Test owner who is also leader counts as one automatic attendee."""
         Invitation.objects.filter(event=self.event).delete()
 
         self.assertEqual(get_current_attendance(self.event), 1)
 
     def test_distinct_owner_and_leader_each_count_as_automatic_attendees(self):
+        """Test distinct owner and leader each count as automatic attendees."""
         Invitation.objects.filter(event=self.event).delete()
         other_leader = Person.objects.create(
             name="Other Leader", email="other-leader@example.com"
@@ -1160,6 +1215,7 @@ class EventInvitationServiceTests(TestCase):
         self.assertEqual(get_current_attendance(self.event), 2)
 
     def test_owner_and_leader_legacy_attending_invitations_do_not_double_count(self):
+        """Test owner and leader legacy attending invitations do not double count."""
         Invitation.objects.filter(event=self.event).delete()
         other_leader = Person.objects.create(
             name="Other Leader", email="other-leader@example.com"
@@ -1185,6 +1241,7 @@ class EventInvitationServiceTests(TestCase):
 
     @patch("planner.services.event_invitations.send_email")
     def test_sending_eligible_person_creates_pending_invitation_once(self, mocked_send):
+        """Test sending eligible person creates pending invitation once."""
         mocked_send.return_value = "gmail-message-id"
 
         result = send_event_invitation(self.event, self.recipient)
@@ -1205,6 +1262,7 @@ class EventInvitationServiceTests(TestCase):
 
     @patch("planner.services.event_invitations.send_email")
     def test_ineligible_person_is_rejected_without_sending(self, mocked_send):
+        """Test ineligible person is rejected without sending."""
         ineligible_person = Person.objects.create(
             name="Ineligible", email="ineligible@example.com"
         )
@@ -1218,6 +1276,7 @@ class EventInvitationServiceTests(TestCase):
 
 class AdministrativeAuthorizationTests(TestCase):
     def setUp(self):
+        """Create fixtures for this test case."""
         user_model = get_user_model()
         self.staff_user = user_model.objects.create_user(
             username="staff-user",
@@ -1257,6 +1316,7 @@ class AdministrativeAuthorizationTests(TestCase):
         )
 
     def test_anonymous_users_are_redirected_from_administrative_pages_and_updates(self):
+        """Test anonymous users are redirected from administrative pages and updates."""
         home_response = self.client.get(reverse("home"))
         self.assertContains(home_response, "Login")
         self.assertNotContains(home_response, 'href="/events/"')
@@ -1279,6 +1339,7 @@ class AdministrativeAuthorizationTests(TestCase):
         self.assertEqual(self.invitation.result, Invitation.Result.PENDING)
 
     def test_non_staff_users_receive_forbidden_for_administrative_functions(self):
+        """Test non staff users receive forbidden for administrative functions."""
         self.client.force_login(self.non_staff_user)
 
         self.assertEqual(self.client.get(reverse("events")).status_code, 403)
@@ -1295,6 +1356,7 @@ class AdministrativeAuthorizationTests(TestCase):
         self.assertEqual(self.invitation.plus_ones, 0)
 
     def test_staff_users_can_access_events_and_update_invitations(self):
+        """Test staff users can access events and update invitations."""
         self.client.force_login(self.staff_user)
         events_response = self.client.get(reverse("events"))
         self.assertEqual(events_response.status_code, 200)
@@ -1321,6 +1383,7 @@ class AdministrativeAuthorizationTests(TestCase):
         self.assertEqual(self.invitation.plus_ones, 1)
 
     def test_login_and_post_logout_use_sessions(self):
+        """Test login and post logout use sessions."""
         response = self.client.post(
             reverse("login"),
             {"username": self.staff_user.username, "password": "test-password"},

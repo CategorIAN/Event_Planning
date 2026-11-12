@@ -1,4 +1,5 @@
 from django.contrib import admin
+from typing import Any
 
 from .models import (
     Form,
@@ -102,7 +103,18 @@ class FormSubmissionAdmin(admin.ModelAdmin):
     )
     ordering = ("-submitted_at",)
 
-    def get_readonly_fields(self, request, obj=None):
+    def get_readonly_fields(
+        self, request: Any, obj: FormSubmission | None = None
+    ) -> tuple[str, ...]:
+        """Keep a persisted Google response ID immutable in Django admin.
+
+        Args:
+            request: Admin request object supplied by Django.
+            obj: Existing submission being edited, if any.
+
+        Returns:
+            Field names Django admin must render as read-only.
+        """
         if obj:
             return ("google_response_id",)
         return ()

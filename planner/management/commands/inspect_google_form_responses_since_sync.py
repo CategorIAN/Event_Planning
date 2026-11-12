@@ -13,6 +13,7 @@ class Command(BaseCommand):
     help = "Retrieve and print responses submitted after a form's last sync time."
 
     def add_arguments(self, parser):
+        """Perform add arguments."""
         parser.add_argument(
             "form_id",
             nargs="?",
@@ -21,6 +22,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        """Perform handle."""
         form_id = options["form_id"]
         try:
             form = Form.objects.get(google_form_id=form_id)

@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand
+from typing import Any
 
 from planner.models import Day, DayHour, Hour
 
@@ -6,7 +7,13 @@ from planner.models import Day, DayHour, Hour
 class Command(BaseCommand):
     help = "Create missing DayHour records for every existing Day and Hour."
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
+        """Create missing DayHour records and print an idempotency summary.
+
+        Args:
+            *args: Framework-supplied positional command arguments. Unused.
+            **options: Framework-supplied command options. Unused.
+        """
         days = list(Day.objects.all())
         hours = list(Hour.objects.all())
         created_count = 0

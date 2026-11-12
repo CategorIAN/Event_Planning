@@ -34,6 +34,7 @@ class SurveyRequestRecordingError(SurveyRequestEmailError):
     """Raised when a sent survey request cannot be recorded."""
 
     def __init__(self, message: str, *, email: "SurveyEmail", message_id: str):
+        """Store sent-email details for a request-recording failure."""
         super().__init__(message)
         self.email = email
         self.message_id = message_id
@@ -148,6 +149,11 @@ def request_survey_email(
 
 
 def _validate_recipient(person: Person, form: Form, request_type: str) -> None:
+    """Validate survey-request type, recipient eligibility, and public form URL.
+
+    Raises:
+        SurveyRequestValidationError: If any required value is invalid or unavailable.
+    """
     if request_type not in REQUEST_TYPES:
         raise SurveyRequestValidationError(f"Unknown survey request type: {request_type}.")
     if person.status == Person.Status.PLEASE_REMOVE:
