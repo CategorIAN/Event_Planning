@@ -500,6 +500,12 @@ class Event(models.Model):
         related_name="led_events",
     )
 
+    image = models.ImageField(
+        upload_to="events/",
+        null=True,
+        blank=True,
+    )
+
     @property
     def reviewed(self) -> bool | None:
         """Return whether this Event's outcome and attendance have been reviewed."""

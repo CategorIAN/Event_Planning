@@ -104,6 +104,7 @@
             {% if request.user.is_staff %}
                 <a class="nav-link" href="{% url 'events' %}">Events</a>
                 <a class="nav-link" href="{% url 'availability' %}">Availability</a>
+                <a class="nav-link" href="{% url 'er_diagram' %}">ER Diagram</a>
                 <a class="nav-link" href="{% url 'form_submissions' %}">Form Submissions</a>
                 <a class="nav-link" href="{% url 'survey_updates' %}">Survey Updates</a>
             {% endif %}

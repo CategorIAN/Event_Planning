@@ -63,3 +63,9 @@ class EventForm(forms.ModelForm):
             ).first()
             if owner is not None:
                 self.initial["leader"] = owner.pk
+
+
+class EventPhotoForm(forms.Form):
+    """Validate one uploaded Event photo."""
+
+    image = forms.ImageField()

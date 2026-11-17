@@ -16,7 +16,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from planner.forms import EventForm, SendSurveyRequestForm
+from planner.forms import EventForm, EventPhotoForm, SendSurveyRequestForm
 from planner.models import Day, Event, Form, FormRequest, FormSubmission, Game, Hour, Invitation, Person, TimeSpan
 from planner.services.availability import day_hour_ids, is_available_for_time_span
 from planner.services.form_response_sync import (
@@ -72,6 +72,12 @@ def staff_required(view_func):
 def home(request: HttpRequest) -> HttpResponse:
     """Perform home."""
     return render(request, "planner/home.html")
+
+
+@staff_required
+def er_diagram(request: HttpRequest) -> HttpResponse:
+    """Render the staff-only database entity-relationship diagram."""
+    return render(request, "planner/er_diagram.html")
 
 
 @staff_required
@@ -264,6 +270,60 @@ def update_event_happened(request: HttpRequest, event_id: int) -> HttpResponse:
 
 @staff_required
 @require_POST
+def update_event_photo(request: HttpRequest, event_id: int) -> HttpResponse:
+    """Upload or replace the selected Event's image.
+
+    The old storage file is deleted only after the replacement image has been
+    saved on the Event record.
+    """
+    event = get_object_or_404(Event, pk=event_id)
+    photo_form = EventPhotoForm(request.POST, request.FILES)
+    if not photo_form.is_valid():
+        messages.error(request, "The photo could not be saved. Correct the errors below.")
+        return _render_events_page(
+            request,
+            EventForm(),
+            status=400,
+            photo_form=photo_form,
+            show_photo_modal=True,
+        )
+
+    old_image_name = event.image.name if event.image else ""
+    event.image = photo_form.cleaned_data["image"]
+    event.save(update_fields=["image"])
+    if old_image_name and old_image_name != event.image.name:
+        try:
+            event.image.storage.delete(old_image_name)
+        except OSError:
+            messages.warning(request, "The new photo was saved, but the old file could not be removed.")
+    messages.success(request, "Event photo saved.")
+    return redirect(_events_url(event))
+
+
+@staff_required
+@require_POST
+def delete_event_photo(request: HttpRequest, event_id: int) -> HttpResponse:
+    """Clear the selected Event's image and remove its stored file."""
+    event = get_object_or_404(Event, pk=event_id)
+    if not event.image:
+        messages.info(request, "This Event does not have a photo.")
+        return redirect(_events_url(event))
+
+    storage = event.image.storage
+    image_name = event.image.name
+    event.image = None
+    event.save(update_fields=["image"])
+    try:
+        storage.delete(image_name)
+    except OSError:
+        messages.warning(request, "The photo was removed from the Event, but its stored file could not be removed.")
+    else:
+        messages.success(request, "Event photo deleted.")
+    return redirect(_events_url(event))
+
+
+@staff_required
+@require_POST
 def update_event_invitation_result(
     request: HttpRequest, event_id: int, invitation_id: int
 ) -> HttpResponse:
@@ -341,6 +401,8 @@ def _render_events_page(
     event_form: EventForm,
     *,
     status: int = 200,
+    photo_form: EventPhotoForm | None = None,
+    show_photo_modal: bool = False,
 ) -> HttpResponse:
     """Perform render events page."""
     now = timezone.now()
@@ -397,6 +459,8 @@ def _render_events_page(
             "events": event_choices,
             "selected_event": selected_event,
             "event_form": event_form,
+            "photo_form": photo_form or EventPhotoForm(),
+            "show_photo_modal": show_photo_modal,
             "invitation_rows": (
                 get_invitation_list(selected_event) if selected_event is not None else []
             ),

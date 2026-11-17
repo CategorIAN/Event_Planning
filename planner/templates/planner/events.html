@@ -90,6 +90,30 @@
             margin: 0 0 1.5rem;
         }
 
+        .selected-event-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .selected-event-header .current-event-title {
+            flex: 1;
+        }
+
+        .event-photo {
+            display: block;
+            width: 100%;
+            max-width: 900px;
+            height: auto;
+            max-height: 70vh;
+            margin: 0 0 1.5rem;
+            object-fit: contain;
+            border-radius: 8px;
+            border: 1px solid #b9b9b9;
+            background: #f7f7f7;
+        }
+
         .current-event-title button {
             border: 0;
             background: none;
@@ -360,15 +384,22 @@
             <noscript><button type="submit">Select</button></noscript>
         </form>
 
-        <h2 class="current-event-title">
-            <button id="open-event-details-modal" type="button" aria-haspopup="dialog">{{ selected_event }}</button>
-            {% if selected_event.happened %}
-                <span class="event-happened-status yes" role="img" aria-label="Event happened">&#10003;</span>
-            {% elif selected_event.happened is not None %}
-                <span class="event-happened-status no" role="img" aria-label="Event did not happen">&#10007;</span>
-            {% endif %}
-        </h2>
+        <div class="selected-event-header">
+            <h2 class="current-event-title">
+                <button id="open-event-details-modal" type="button" aria-haspopup="dialog">{{ selected_event }}</button>
+                {% if selected_event.happened %}
+                    <span class="event-happened-status yes" role="img" aria-label="Event happened">&#10003;</span>
+                {% elif selected_event.happened is not None %}
+                    <span class="event-happened-status no" role="img" aria-label="Event did not happen">&#10007;</span>
+                {% endif %}
+            </h2>
+            <button class="action-button" id="open-event-photo-modal" type="button" aria-haspopup="dialog">{% if selected_event.image %}Edit Photo{% else %}Add Photo{% endif %}</button>
+        </div>
         <p class="event-review-status">{{ selected_event.review_status_label }}</p>
+
+        {% if selected_event.image %}
+            <img class="event-photo" src="{{ selected_event.image.url }}" alt="Photo for {{ selected_event }}">
+        {% endif %}
 
         <section class="invitation-list-section">
             <div class="section-heading">
@@ -559,6 +590,30 @@
                 </form>
             </section>
         </div>
+
+        <div class="event-modal" id="event-photo-modal" role="dialog" aria-modal="true" aria-labelledby="event-photo-modal-title" {% if not show_photo_modal %}hidden{% endif %}>
+            <section class="event-modal-content">
+                <button class="event-modal-close" id="close-event-photo-modal" type="button" aria-label="Close photo form">&times;</button>
+                <h2 id="event-photo-modal-title">{% if selected_event.image %}Edit Photo{% else %}Add Photo{% endif %}</h2>
+                <form class="event-form" method="post" enctype="multipart/form-data" action="{% url 'update_event_photo' selected_event.pk %}?event_id={{ selected_event.pk }}">
+                    {% csrf_token %}
+                    {{ photo_form.non_field_errors }}
+                    <label>
+                        Photo
+                        {{ photo_form.image }}
+                        {{ photo_form.image.errors }}
+                    </label>
+                    <button class="action-button" type="submit">Save</button>
+                    <button id="cancel-event-photo-modal" type="button">Cancel</button>
+                </form>
+                {% if selected_event.image %}
+                    <form method="post" action="{% url 'delete_event_photo' selected_event.pk %}">
+                        {% csrf_token %}
+                        <button class="action-button" type="submit">Delete Photo</button>
+                    </form>
+                {% endif %}
+            </section>
+        </div>
     {% endif %}
 {% endblock %}
 
@@ -629,6 +684,24 @@
         document.addEventListener("keydown", event => {
             if (event.key === "Escape" && !happenedModal.hidden) {
                 closeHappenedModal();
+            }
+        });
+
+        const eventPhotoModal = document.getElementById("event-photo-modal");
+        const closeEventPhotoModal = () => { eventPhotoModal.hidden = true; };
+        document.getElementById("open-event-photo-modal").addEventListener("click", () => {
+            eventPhotoModal.hidden = false;
+        });
+        document.getElementById("close-event-photo-modal").addEventListener("click", closeEventPhotoModal);
+        document.getElementById("cancel-event-photo-modal").addEventListener("click", closeEventPhotoModal);
+        eventPhotoModal.addEventListener("click", event => {
+            if (event.target === eventPhotoModal) {
+                closeEventPhotoModal();
+            }
+        });
+        document.addEventListener("keydown", event => {
+            if (event.key === "Escape" && !eventPhotoModal.hidden) {
+                closeEventPhotoModal();
             }
         });
 

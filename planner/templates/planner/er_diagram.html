@@ -1,0 +1,193 @@
+{% extends "planner/base.html" %}
+
+{% block title %}ER Diagram | Event Planner{% endblock %}
+
+{% block extra_head %}
+.er-diagram-scroll {
+    overflow: auto;
+    max-height: calc(100vh - 2rem);
+    border: 1px solid #b9b9b9;
+    background: #fff;
+    padding: 1rem;
+}
+
+.er-diagram-scroll .mermaid {
+    min-width: 1800px;
+}
+{% endblock %}
+
+{% block content %}
+<h1>ER Diagram</h1>
+<p>Database schema for the event planner. Scroll horizontally and vertically to inspect the full diagram.</p>
+
+<div class="er-diagram-scroll">
+<pre class="mermaid">
+erDiagram
+    Day {
+        bigint id PK
+        string name UK
+        smallint order UK
+    }
+    Hour {
+        bigint id PK
+        time time UK
+    }
+    DayHour {
+        bigint id PK
+        bigint day_id FK
+        bigint hour_id FK
+    }
+    TimeSpan {
+        bigint id PK
+        bigint day_id FK
+        bigint start_hour_id FK
+        bigint end_hour_id FK
+    }
+    Duration {
+        bigint id PK
+        string name
+        int days
+    }
+    GameType {
+        bigint id PK
+        string name UK
+        string url
+    }
+    Game {
+        bigint id PK
+        string name UK
+        string url
+        string boardgamegeek_url
+        bigint game_type_id FK
+        smallint expected_duration_hours
+        smallint min_players
+        smallint max_players
+    }
+    Platform {
+        bigint id PK
+        string name UK
+        string url
+    }
+    Person {
+        bigint id PK
+        string name
+        string email
+        int max_game_hours
+        string status
+        duration earliest_invite_lead
+        duration latest_invite_lead
+        string guest_games
+        duration event_cooldown
+        string role
+    }
+    Form {
+        bigint id PK
+        string name
+        string google_form_id UK
+        string survey_url
+        datetime last_synced_at
+    }
+    FormQuestionGroup {
+        bigint id PK
+        bigint form_id FK
+        string google_item_id
+        string name
+    }
+    FormQuestion {
+        bigint id PK
+        bigint form_id FK
+        bigint group_id FK
+        string google_question_id
+        string name
+        bigint hour_id FK
+    }
+    FormQuestionChoice {
+        bigint id PK
+        bigint question_id FK
+        string google_value
+        string value
+        bigint game_id FK
+        bigint platform_id FK
+        bigint game_type_id FK
+        bigint duration_id FK
+    }
+    FormRequest {
+        bigint id PK
+        bigint person_id FK
+        bigint form_id FK
+        datetime requested_at
+    }
+    FormSubmission {
+        bigint id PK
+        bigint form_id FK
+        bigint person_id FK
+        string google_response_id
+        string submitted_name
+        string submitted_email
+        datetime submitted_at
+        json raw_response_data
+    }
+    FormQuestionGroupChoice {
+        bigint id PK
+        bigint group_id FK
+        string google_value
+        bigint day_id FK
+    }
+    Event {
+        bigint id PK
+        datetime timestamp
+        bigint time_span_id FK
+        bigint game_id FK
+        boolean happened
+        bigint leader_id FK
+    }
+    Invitation {
+        bigint id PK
+        bigint event_id FK
+        bigint person_id FK
+        datetime invited_at
+        smallint plus_ones
+        string result
+    }
+
+    Day ||--o{ DayHour : day
+    Hour ||--o{ DayHour : hour
+    Day ||--o{ TimeSpan : day
+    Hour ||--o{ TimeSpan : start_hour
+    Hour ||--o{ TimeSpan : end_hour
+    GameType ||--o{ Game : game_type
+    Form ||--o{ FormQuestionGroup : form
+    Form ||--o{ FormQuestion : form
+    FormQuestionGroup o|--o{ FormQuestion : group
+    Hour o|--o{ FormQuestion : hour
+    FormQuestion ||--o{ FormQuestionChoice : question
+    Game o|--o{ FormQuestionChoice : game
+    Platform o|--o{ FormQuestionChoice : platform
+    GameType o|--o{ FormQuestionChoice : game_type
+    Duration o|--o{ FormQuestionChoice : duration
+    Person ||--o{ FormRequest : person
+    Form ||--o{ FormRequest : form
+    Form ||--o{ FormSubmission : form
+    Person o|--o{ FormSubmission : person
+    FormQuestionGroup ||--o{ FormQuestionGroupChoice : group
+    Day o|--o{ FormQuestionGroupChoice : day
+    TimeSpan ||--o{ Event : time_span
+    Game ||--o{ Event : game
+    Person ||--o{ Event : leader
+    Event ||--o{ Invitation : event
+    Person ||--o{ Invitation : person
+    TimeSpan }o--o{ DayHour : day_hours
+    Person }o--o{ DayHour : availability
+    Person }o--o{ Game : games
+    Person }o--o{ GameType : game_types
+    Person }o--o{ Platform : platforms
+</pre>
+</div>
+{% endblock %}
+
+{% block extra_script %}
+<script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+</script>
+{% endblock %}

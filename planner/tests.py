@@ -1,10 +1,13 @@
 import base64
+import shutil
+import tempfile
 from datetime import datetime, time, timedelta, timezone as datetime_timezone
 from email import message_from_bytes
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.db import DatabaseError
@@ -1314,6 +1317,69 @@ class AdministrativeAuthorizationTests(TestCase):
             person=Person.objects.create(name="Invitee", email="invitee@example.com"),
             invited_at=aware(2026, 10, 1),
         )
+        self.media_directory = tempfile.mkdtemp()
+        self.settings_override = override_settings(MEDIA_ROOT=self.media_directory)
+        self.settings_override.enable()
+
+    def tearDown(self):
+        """Remove the temporary media directory used by image-upload tests."""
+        self.settings_override.disable()
+        shutil.rmtree(self.media_directory)
+
+    @staticmethod
+    def _uploaded_image(name="event.gif"):
+        """Return a small valid GIF upload for Event photo tests."""
+        return SimpleUploadedFile(
+            name,
+            base64.b64decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="),
+            content_type="image/gif",
+        )
+
+    def test_staff_can_upload_replace_and_delete_an_event_photo(self):
+        """Test staff photo upload, replacement cleanup, and deletion."""
+        self.client.force_login(self.staff_user)
+        upload_url = reverse("update_event_photo", args=[self.event.pk])
+        response = self.client.post(upload_url, {"image": self._uploaded_image("first.gif")})
+        self.assertRedirects(response, reverse("events") + f"?event_id={self.event.pk}")
+        self.event.refresh_from_db()
+        first_image_name = self.event.image.name
+        self.assertTrue(self.event.image.storage.exists(first_image_name))
+
+        response = self.client.post(upload_url, {"image": self._uploaded_image("second.gif")})
+        self.assertEqual(response.status_code, 302)
+        self.event.refresh_from_db()
+        self.assertNotEqual(self.event.image.name, first_image_name)
+        self.assertFalse(self.event.image.storage.exists(first_image_name))
+        second_image_name = self.event.image.name
+
+        response = self.client.post(reverse("delete_event_photo", args=[self.event.pk]))
+        self.assertRedirects(response, reverse("events") + f"?event_id={self.event.pk}")
+        self.event.refresh_from_db()
+        self.assertFalse(bool(self.event.image))
+        self.assertFalse(self.event.image.storage.exists(second_image_name))
+
+    def test_invalid_event_photo_reopens_the_modal_with_errors(self):
+        """Test invalid uploads do not change an Event image."""
+        self.client.force_login(self.staff_user)
+        response = self.client.post(
+            reverse("update_event_photo", args=[self.event.pk]) + f"?event_id={self.event.pk}",
+            {"image": SimpleUploadedFile("not-an-image.txt", b"not an image", content_type="text/plain")},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "The photo could not be saved.", status_code=400)
+        self.assertContains(response, "event-photo-modal", status_code=400)
+        self.event.refresh_from_db()
+        self.assertFalse(bool(self.event.image))
+
+    def test_photo_endpoints_require_staff_access(self):
+        """Test anonymous and non-staff users cannot change Event photos."""
+        upload_url = reverse("update_event_photo", args=[self.event.pk])
+        delete_url = reverse("delete_event_photo", args=[self.event.pk])
+        self.assertEqual(self.client.post(upload_url, {"image": self._uploaded_image()}).status_code, 302)
+
+        self.client.force_login(self.non_staff_user)
+        self.assertEqual(self.client.post(upload_url, {"image": self._uploaded_image()}).status_code, 403)
+        self.assertEqual(self.client.post(delete_url).status_code, 403)
 
     def test_anonymous_users_are_redirected_from_administrative_pages_and_updates(self):
         """Test anonymous users are redirected from administrative pages and updates."""

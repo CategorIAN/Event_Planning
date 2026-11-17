@@ -16,7 +16,10 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
-from django.urls import path
+from django.urls import path, re_path
+from django.views.static import serve
+from django.conf import settings
+from django.conf.urls.static import static
 
 from planner import views
 
@@ -33,8 +36,11 @@ urlpatterns = [
         name='logout',
     ),
     path('availability/', views.availability, name='availability'),
+    path('er-diagram/', views.er_diagram, name='er_diagram'),
     path('events/', views.events, name='events'),
     path('events/create/', views.create_event, name='create_event'),
+    path('events/<int:event_id>/photo/', views.update_event_photo, name='update_event_photo'),
+    path('events/<int:event_id>/photo/delete/', views.delete_event_photo, name='delete_event_photo'),
     path(
         'events/<int:event_id>/happened/',
         views.update_event_happened,
@@ -78,4 +84,14 @@ urlpatterns = [
         name='mark_survey_requested',
     ),
     path('admin/', admin.site.urls),
+    re_path(
+        r"^media/(?P<path>.*)$",
+        serve,
+        {"document_root": settings.MEDIA_ROOT},
+    ),
 ]
+
+urlpatterns += static(
+    settings.MEDIA_URL,
+    document_root=settings.MEDIA_ROOT,
+)
