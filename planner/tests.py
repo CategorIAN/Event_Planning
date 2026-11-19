@@ -1448,6 +1448,26 @@ class AdministrativeAuthorizationTests(TestCase):
         self.assertEqual(self.invitation.result, Invitation.Result.ATTENDING)
         self.assertEqual(self.invitation.plus_ones, 1)
 
+    def test_staff_can_edit_an_event_from_the_events_page(self):
+        """Test staff can save selected Event details through the edit endpoint."""
+        self.client.force_login(self.staff_user)
+        response = self.client.post(
+            reverse("edit_event", args=[self.event.pk]) + f"?event_id={self.event.pk}",
+            {
+                "game": self.event.game_id,
+                "timestamp": "2026-11-02T17:00",
+                "time_span": self.event.time_span_id,
+                "leader": self.event.leader_id,
+                "happened": "",
+            },
+        )
+        self.assertRedirects(response, reverse("events") + f"?event_id={self.event.pk}")
+        self.event.refresh_from_db()
+        self.assertEqual(
+            self.event.timestamp,
+            datetime(2026, 11, 3, 0, tzinfo=datetime_timezone.utc),
+        )
+
     def test_login_and_post_logout_use_sessions(self):
         """Test login and post logout use sessions."""
         response = self.client.post(

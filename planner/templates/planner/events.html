@@ -575,6 +575,27 @@
                     <div><dt>Game min players</dt><dd>{{ selected_event.game.min_players|default:"Not set" }}</dd></div>
                     <div><dt>Game max players</dt><dd>{{ selected_event.game.max_players|default:"Not set" }}</dd></div>
                 </dl>
+                <button class="action-button" id="open-edit-event-modal" type="button">Edit</button>
+            </section>
+        </div>
+
+        <div class="event-modal" id="edit-event-modal" role="dialog" aria-modal="true" aria-labelledby="edit-event-modal-title" {% if not show_edit_event_modal %}hidden{% endif %}>
+            <section class="event-modal-content">
+                <button class="event-modal-close" id="close-edit-event-modal" type="button" aria-label="Close edit event form">&times;</button>
+                <h2 id="edit-event-modal-title">Edit Event</h2>
+                <form class="event-form" method="post" action="{% url 'edit_event' selected_event.pk %}?event_id={{ selected_event.pk }}">
+                    {% csrf_token %}
+                    {{ edit_event_form.non_field_errors }}
+                    {% for field in edit_event_form %}
+                        <label>
+                            {{ field.label }}
+                            {{ field }}
+                            {{ field.errors }}
+                        </label>
+                    {% endfor %}
+                    <button class="action-button" type="submit">Save Changes</button>
+                    <button id="cancel-edit-event-modal" type="button">Cancel</button>
+                </form>
             </section>
         </div>
 
@@ -634,6 +655,25 @@
         document.addEventListener("keydown", event => {
             if (event.key === "Escape" && !eventModal.hidden) {
                 closeEventModal();
+            }
+        });
+
+        const editEventModal = document.getElementById("edit-event-modal");
+        const closeEditEventModal = () => { editEventModal.hidden = true; };
+        document.getElementById("open-edit-event-modal").addEventListener("click", () => {
+            eventDetailsModal.hidden = true;
+            editEventModal.hidden = false;
+        });
+        document.getElementById("close-edit-event-modal").addEventListener("click", closeEditEventModal);
+        document.getElementById("cancel-edit-event-modal").addEventListener("click", closeEditEventModal);
+        editEventModal.addEventListener("click", event => {
+            if (event.target === editEventModal) {
+                closeEditEventModal();
+            }
+        });
+        document.addEventListener("keydown", event => {
+            if (event.key === "Escape" && !editEventModal.hidden) {
+                closeEditEventModal();
             }
         });
 

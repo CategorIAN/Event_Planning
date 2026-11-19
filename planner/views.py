@@ -228,6 +228,25 @@ def create_event(request: HttpRequest) -> HttpResponse:
 
 @staff_required
 @require_POST
+def edit_event(request: HttpRequest, event_id: int) -> HttpResponse:
+    """Update one selected Event from the shared Event form."""
+    event = get_object_or_404(Event, pk=event_id)
+    edit_event_form = EventForm(request.POST, instance=event)
+    if edit_event_form.is_valid():
+        edit_event_form.save()
+        messages.success(request, "Event updated.")
+        return redirect(_events_url(event))
+    return _render_events_page(
+        request,
+        EventForm(),
+        status=400,
+        edit_event_form=edit_event_form,
+        show_edit_event_modal=True,
+    )
+
+
+@staff_required
+@require_POST
 def send_event_invitation_from_events(
     request: HttpRequest, event_id: int, person_id: int
 ) -> HttpResponse:
@@ -403,6 +422,8 @@ def _render_events_page(
     status: int = 200,
     photo_form: EventPhotoForm | None = None,
     show_photo_modal: bool = False,
+    edit_event_form: EventForm | None = None,
+    show_edit_event_modal: bool = False,
 ) -> HttpResponse:
     """Perform render events page."""
     now = timezone.now()
@@ -459,6 +480,10 @@ def _render_events_page(
             "events": event_choices,
             "selected_event": selected_event,
             "event_form": event_form,
+            "edit_event_form": edit_event_form or (
+                EventForm(instance=selected_event) if selected_event is not None else None
+            ),
+            "show_edit_event_modal": show_edit_event_modal,
             "photo_form": photo_form or EventPhotoForm(),
             "show_photo_modal": show_photo_modal,
             "invitation_rows": (

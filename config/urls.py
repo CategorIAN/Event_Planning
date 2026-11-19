@@ -39,6 +39,7 @@ urlpatterns = [
     path('er-diagram/', views.er_diagram, name='er_diagram'),
     path('events/', views.events, name='events'),
     path('events/create/', views.create_event, name='create_event'),
+    path('events/<int:event_id>/edit/', views.edit_event, name='edit_event'),
     path('events/<int:event_id>/photo/', views.update_event_photo, name='update_event_photo'),
     path('events/<int:event_id>/photo/delete/', views.delete_event_photo, name='delete_event_photo'),
     path(
