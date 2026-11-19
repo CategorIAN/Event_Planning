@@ -520,7 +520,7 @@ class Event(models.Model):
 
     def __str__(self):
         """Return a human-readable representation."""
-        timestamp = self.timestamp.strftime(
+        timestamp = timezone.localtime(self.timestamp).strftime(
             "%A, %B %d, %Y at %I:%M %p"
         ).replace(" 0", " ")
 
@@ -565,7 +565,6 @@ class Invitation(models.Model):
     def __str__(self):
         """Return a human-readable representation."""
         return f"{self.person} — {self.event}"
-
 
 
 
